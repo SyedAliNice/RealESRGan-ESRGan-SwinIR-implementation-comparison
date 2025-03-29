@@ -1,6 +1,6 @@
 
 # 📌 Image Super-Resolution: Real-ESRGAN, ESRGAN & SwinIR
-![image alt]()
+![image alt](https://github.com/SyedAliNice/RealESRGan-ESRGan-SwinIR-implementation-comparison/blob/0255d105b24d7a4e3d6ed5fd119655cf8e595600/a-comparison-of-images-generated-by-the-_Iiuzz-diTEe8LzvjjVIclQ_7b6e6lydTmCkg1N7KolvNQ-fotor-2025032983258.jpg)
 #       🚀 Overview
 This project implements and compares three popular deep-learning-based image super-resolution models:
 
