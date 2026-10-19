@@ -32,7 +32,7 @@ Inno Setup 6 is the stable line; 7.x is acceptable if the later installer task p
 
 Files: `installer/DetailFrame.iss` (Inno Setup script), `installer/prerequisites.ps1` (prerequisite logic), `tests/release/test_installer_prerequisites.ps1`.
 
-**Tested Inno Setup version: none.** ISCC is not installed on the authoring machine, so `DetailFrame.iss` has never been compiled; only static checks run. It uses features from Inno Setup 6.3+ (`x64compatible`); compile it with 6.7.3 (or 7.x) and fix any compiler findings before release.
+**RELEASE GATE: `DetailFrame.iss` has NOT been compiled yet, and no Inno Setup version has been tested.** ISCC is not installed on the authoring machine, so only static checks have run. The script uses features from Inno Setup 6.3+ (`x64compatible`); before any release, compile it with ISCC (6.7.3 or 7.x are candidates only, not verified), fix compiler findings, and record the version that actually compiled it here.
 
 Build tools: .NET SDK (see `build-app.ps1`), the worker build tools (`worker/packaging/build.ps1`), PowerShell 7, Inno Setup 6.3+.
 

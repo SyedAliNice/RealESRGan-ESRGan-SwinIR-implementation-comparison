@@ -30,9 +30,21 @@ function New-PrereqResult([bool]$Ok, [int]$Code, [string]$Message, [bool]$Runtim
     [pscustomobject]@{ Ok = $Ok; Code = $Code; Message = $Message; RuntimeInstalled = $RuntimeInstalled }
 }
 
+# Get-AppxPackage reports Architecture as an enum (X64 = 9); accept its name or number, never x86/arm/neutral.
+function Test-PackageIsX64($pkg) {
+    $arch = $pkg.Architecture
+    if ($null -eq $arch) { $arch = $pkg.ProcessorArchitecture }
+    if ($null -eq $arch) { return $false }
+    $s = "$arch".Trim()
+    return ($s -ieq "X64" -or $s -eq "9")
+}
+
 function Test-RuntimePresent([scriptblock]$RuntimeProbe) {
     foreach ($pkg in @(& $RuntimeProbe)) {
-        if ($pkg -and ([version]$pkg.Version) -ge $script:RuntimeMinVersion -and ([version]$pkg.Version).Major -eq $script:RuntimeMinVersion.Major) { return $true }
+        if (-not $pkg -or -not (Test-PackageIsX64 $pkg)) { continue }
+        $v = $null
+        if (-not [version]::TryParse("$($pkg.Version)", [ref]$v)) { continue }
+        if ($v -ge $script:RuntimeMinVersion -and $v.Major -eq $script:RuntimeMinVersion.Major) { return $true }
     }
     return $false
 }

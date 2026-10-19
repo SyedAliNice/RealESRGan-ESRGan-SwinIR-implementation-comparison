@@ -18,9 +18,9 @@ $fake = Join-Path $scratch "WindowsAppRuntimeInstall-x64.exe"
 Set-Content $fake "not a real installer"
 $fakeHash = (Get-FileHash $fake -Algorithm SHA256).Hash.ToLowerInvariant()
 
-$present = { [pscustomobject]@{ Version = "2.5.1.0" } }
+$present = { [pscustomobject]@{ Version = "2.5.1.0"; Architecture = "X64" } }
 $absent = { @() }
-$old = { [pscustomobject]@{ Version = "2.4.0.0" } }
+$old = { [pscustomobject]@{ Version = "2.4.0.0"; Architecture = "X64" } }
 
 $r = Invoke-PrerequisiteCheck -OsBuild 19045 -Architecture AMD64 -RuntimeProbe $present
 Check "Windows 10 is rejected with a clear message" ((-not $r.Ok) -and $r.Code -eq 10 -and $r.Message -match "Windows 11")
@@ -29,8 +29,20 @@ Check "ARM64 is rejected with a clear message" ((-not $r.Ok) -and $r.Code -eq 11
 $r = Invoke-PrerequisiteCheck -OsBuild 26100 -Architecture x86 -RuntimeProbe $present
 Check "x86 is rejected" ((-not $r.Ok) -and $r.Code -eq 11)
 
+$x86Only = { [pscustomobject]@{ Version = "2.5.1.0"; Architecture = "X86" } }
+$x64Enum = { [pscustomobject]@{ Version = "2.5.1.0"; Architecture = 9 } }
+$mixed = { @([pscustomobject]@{ Version = "2.5.1.0"; Architecture = "X86" }, [pscustomobject]@{ Version = "2.5.3.0"; Architecture = "X64" }) }
+$noArch = { [pscustomobject]@{ Version = "2.5.1.0" } }
+Check "x86-only runtime package does not satisfy the x64 prerequisite" (-not (Test-RuntimePresent $x86Only))
+Check "x64 runtime package satisfies the prerequisite" (Test-RuntimePresent $present)
+Check "x64 architecture given as enum value satisfies the prerequisite" (Test-RuntimePresent $x64Enum)
+Check "x64 package among x86 packages satisfies the prerequisite" (Test-RuntimePresent $mixed)
+Check "package without architecture is not accepted" (-not (Test-RuntimePresent $noArch))
+$r = Invoke-PrerequisiteCheck -OsBuild 26100 -Architecture AMD64 -RuntimeProbe $x86Only -ProbeOnly
+Check "x86-only runtime is reported missing" ($r.Ok -and $r.Code -eq 20)
+
 $script:ran = 0
-$runner = { param($p) $script:ran++; 0 }
+$runner =  { param($p) $script:ran++; 0 }
 $r = Invoke-PrerequisiteCheck -OsBuild 26100 -Architecture AMD64 -RuntimeProbe $present -InstallerRunner $runner
 Check "supported system with runtime proceeds without installing" ($r.Ok -and $r.Code -eq 0 -and $script:ran -eq 0 -and -not $r.RuntimeInstalled)
 
@@ -39,7 +51,7 @@ Check "probe-only reports missing runtime without installing" ($r.Ok -and $r.Cod
 
 # The runtime appears only after the (mock) installer ran.
 $script:installed = $false
-$probe = { if ($script:installed) { [pscustomobject]@{ Version = "2.5.1.0" } } else { @() } }
+$probe = { if ($script:installed) { [pscustomobject]@{ Version = "2.5.1.0"; Architecture = "X64" } } else { @() } }
 $okRunner = { param($p) $script:ran++; $script:installed = $true; 0 }
 $r = Invoke-PrerequisiteCheck -OsBuild 26100 -Architecture AMD64 -RuntimeProbe $probe -RuntimeInstallerPath $fake -ExpectedSha256 $fakeHash -InstallerRunner $okRunner
 Check "absent runtime invokes the bootstrap installer and succeeds" ($r.Ok -and $script:ran -eq 1 -and $r.RuntimeInstalled)
