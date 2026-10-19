@@ -5,6 +5,7 @@
     <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
     <TargetPlatformMinVersion>10.0.19041.0</TargetPlatformMinVersion>
     <RootNamespace>DetailFrame.App</RootNamespace>
+    <Version>1.0.0</Version>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>Assets\Branding\app.ico</ApplicationIcon>
     <Platforms>x86;x64;ARM64</Platforms>
