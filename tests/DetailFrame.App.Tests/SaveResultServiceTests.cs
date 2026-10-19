@@ -51,6 +51,41 @@ public sealed class SaveResultServiceTests : IDisposable
         public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default) => throw new IOException("There is not enough space on the disk.");
     }
 
+    private sealed class DamagingStream(string path) : FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.None)
+    {
+        public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            var damaged = buffer.ToArray()[..(buffer.Length / 2)];
+            for (var i = 80; i < damaged.Length; i++) damaged[i] = 0xFF;
+            return base.WriteAsync(damaged, cancellationToken);
+        }
+    }
+
+    [Fact]
+    public async Task Damaged_pixel_data_fails_verification_and_keeps_existing_destination()
+    {
+        var path = Path.Combine(_dir, "result.png");
+        using (var stream = new InMemoryRandomAccessStream())
+        {
+            var encoder = await BitmapEncoder.CreateAsync(BitmapEncoder.PngEncoderId, stream);
+            var pixels = new byte[128 * 128 * 4];
+            new Random(1).NextBytes(pixels);
+            encoder.SetPixelData(BitmapPixelFormat.Bgra8, BitmapAlphaMode.Ignore, 128, 128, 96, 96, pixels);
+            await encoder.FlushAsync();
+            stream.Seek(0);
+            var bytes = new byte[stream.Size];
+            await stream.ReadAsync(bytes.AsBuffer(), (uint)stream.Size, InputStreamOptions.None);
+            await File.WriteAllBytesAsync(path, bytes);
+        }
+
+        var dest = Path.Combine(_dir, "existing.png");
+        await File.WriteAllTextAsync(dest, "precious");
+        var result = await new SaveResultService(p => new DamagingStream(p)).SaveAsAsync(path, dest, ImageFormat.Png, default);
+
+        Assert.Equal(SaveStatus.VerificationFailed, result.Status);
+        Assert.Equal("precious", await File.ReadAllTextAsync(dest));
+        Assert.Empty(Directory.GetFiles(_dir, "*.tmp"));
+    }
     [Theory]
     [InlineData(ImageFormat.Png, "out.png")]
     [InlineData(ImageFormat.Jpeg, "out.jpg")]

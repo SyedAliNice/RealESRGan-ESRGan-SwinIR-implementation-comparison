@@ -2,7 +2,6 @@ using DetailFrame.App.Models;
 using DetailFrame.App.Services;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
-using Windows.Storage;
 using Windows.Storage.Pickers;
 
 namespace DetailFrame.App.Views;
@@ -52,6 +51,7 @@ public sealed partial class SavePage : UserControl
         picker.SuggestedFileName = $"{stem}-enhanced";
 
         // The system picker asks before replacing an existing file, which is the explicit overwrite confirmation.
+        var pickerOpenedUtc = DateTime.UtcNow;
         var file = await picker.PickSaveFileAsync();
         if (file is null)
         {
@@ -85,24 +85,8 @@ public sealed partial class SavePage : UserControl
             return;
         }
 
-        await RemoveEmptyPlaceholderAsync(file);
+        SavePlaceholderCleaner.RemoveIfNewEmptyPlaceholder(file.Path, pickerOpenedUtc);
         Show(InfoBarSeverity.Error, "Couldn't save", result.Message ?? "The image could not be saved.");
-    }
-
-    // The picker pre-creates an empty file for new names; remove it if the save failed so no stray file remains.
-    private static async Task RemoveEmptyPlaceholderAsync(StorageFile file)
-    {
-        try
-        {
-            var props = await file.GetBasicPropertiesAsync();
-            if (props.Size == 0)
-            {
-                await file.DeleteAsync();
-            }
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Runtime.InteropServices.COMException)
-        {
-        }
     }
 
     private void Show(InfoBarSeverity severity, string title, string message)

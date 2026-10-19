@@ -21,6 +21,7 @@
     <Compile Include="..\..\src\DetailFrame.App\Models\WorkflowState.cs" Link="Models\WorkflowState.cs" />
     <Compile Include="..\..\src\DetailFrame.App\Models\WorkflowStage.cs" Link="Models\WorkflowStage.cs" />
     <Compile Include="..\..\src\DetailFrame.App\Services\ImageInputService.cs" Link="Services\ImageInputService.cs" />
+    <Compile Include="..\..\src\DetailFrame.App\Services\SavePlaceholderCleaner.cs" Link="Services\SavePlaceholderCleaner.cs" />
     <Compile Include="..\..\src\DetailFrame.App\Services\SaveResultService.cs" Link="Services\SaveResultService.cs" />
     <Compile Include="..\..\src\DetailFrame.App\Models\ModelCatalog.cs" Link="Models\ModelCatalog.cs" />
     <Compile Include="..\..\src\DetailFrame.App\Services\ModelCatalogService.cs" Link="Services\ModelCatalogService.cs" />

@@ -32,6 +32,7 @@ public sealed class SaveResultService
 {
     public const double JpegQuality = 0.95;
     public const double WebPQuality = 0.95;
+    private const uint VerifyMaxDimension = 256;
 
     public const string WebPEncoderMessage =
         "Saving as WebP needs the Microsoft \"WebP Image Extensions\" codec, which is not installed. "
@@ -214,9 +215,27 @@ public sealed class SaveResultService
             var file = await StorageFile.GetFileFromPathAsync(path).AsTask(cancellationToken);
             using var stream = await file.OpenReadAsync().AsTask(cancellationToken);
             var decoder = await BitmapDecoder.CreateAsync(stream).AsTask(cancellationToken);
-            return decoder.PixelWidth == width && decoder.PixelHeight == height;
+            if (decoder.PixelWidth != width || decoder.PixelHeight != height)
+            {
+                return false;
+            }
+
+            // Decode a bounded, scaled-down copy so damaged pixel data fails verification without a full-size allocation.
+            var scale = Math.Min(1.0, (double)VerifyMaxDimension / Math.Max(width, height));
+            var transform = new BitmapTransform
+            {
+                ScaledWidth = (uint)Math.Max(1, (long)(width * scale)),
+                ScaledHeight = (uint)Math.Max(1, (long)(height * scale)),
+            };
+            await decoder.GetPixelDataAsync(
+                BitmapPixelFormat.Bgra8,
+                BitmapAlphaMode.Ignore,
+                transform,
+                ExifOrientationMode.IgnoreExifOrientation,
+                ColorManagementMode.DoNotColorManage).AsTask(cancellationToken);
+            return true;
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Runtime.InteropServices.COMException or ArgumentException)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Runtime.InteropServices.COMException or ArgumentException or InvalidOperationException)
         {
             return false;
         }
