@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools==80.9.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "detailframe-worker"
+version = "1.0.0"
+description = "Local inference worker for DetailFrame"
+requires-python = ">=3.11,<3.15"
+
+[project.optional-dependencies]
+dev = ["pytest==9.1.1"]
+
+[project.scripts]
+detailframe-worker = "detailframe_worker.__main__:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
