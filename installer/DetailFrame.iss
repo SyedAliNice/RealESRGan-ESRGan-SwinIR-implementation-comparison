@@ -46,10 +46,49 @@ Name: "{autodesktop}\DetailFrame"; Filename: "{app}\{#AppExe}"; IconFilename: "{
 Filename: "{app}\{#AppExe}"; Description: "Launch DetailFrame"; Flags: nowait postinstall skipifsilent
 
 ; Uninstall removes only files this installer placed under {app}. User settings and downloaded
-; model weights live under %LOCALAPPDATA%\DetailFrame and are intentionally left in place.
+; model weights live under %LOCALAPPDATA%\DetailFrame (Models, Settings) and are left in place by
+; upgrades and by the default uninstall; see CurUninstallStepChanged for the explicit opt-in removal.
+; This script has no [InstallDelete] or [UninstallDelete] entries so no data path can be removed implicitly.
 ; The shared Windows App SDK runtime is not removed because other applications may use it.
 
 [Code]
+const
+  UserDataDirName = '\DetailFrame';
+
+function UserDataDir: String;
+begin
+  Result := ExpandConstant('{localappdata}') + UserDataDirName;
+end;
+
+function RemoveUserDataRequested: Boolean;
+var
+  I: Integer;
+begin
+  Result := False;
+  for I := 1 to ParamCount do
+    if CompareText(ParamStr(I), '/REMOVEUSERDATA') = 0 then
+      Result := True;
+end;
+
+// Default uninstall (interactive or silent) keeps user data. Deletion needs an explicit
+// "Yes" to a prompt that defaults to "No", or the /REMOVEUSERDATA switch on a silent run.
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+var
+  Remove: Boolean;
+begin
+  if (CurUninstallStep <> usPostUninstall) or (not DirExists(UserDataDir)) then
+    Exit;
+  if UninstallSilent then
+    Remove := RemoveUserDataRequested
+  else
+    Remove := MsgBox('Also delete your DetailFrame settings and downloaded models?' + #13#10 + #13#10 +
+      UserDataDir + #13#10 + #13#10 +
+      'Choose No to keep them for a future install. Downloaded models would need to be downloaded again.',
+      mbConfirmation, MB_YESNO or MB_DEFBUTTON2) = IDYES;
+  if Remove then
+    DelTree(UserDataDir, True, True, True);
+end;
+
 function RunPrerequisites(const Extra: String; var ExitCode: Integer): Boolean;
 var
   Args: String;
