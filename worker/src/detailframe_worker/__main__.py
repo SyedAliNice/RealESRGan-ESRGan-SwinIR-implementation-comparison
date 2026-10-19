@@ -1,8 +1,10 @@
 import argparse
+import sys
 from collections.abc import Sequence
 from pathlib import Path
 
 from detailframe_worker import __version__
+from detailframe_worker.worker import run_worker
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
@@ -33,8 +35,8 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 
 
 def main() -> int:
-    parse_args()
-    return 0
+    args = parse_args()
+    return run_worker(sys.stdin, sys.stdout, sys.stderr, args.models_dir)
 
 
 if __name__ == "__main__":
