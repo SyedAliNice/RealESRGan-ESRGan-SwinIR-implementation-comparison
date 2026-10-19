@@ -48,6 +48,15 @@ try {
     Copy-Item $workerBuild (Join-Path $wpk "build.ps1")
     Check "worker build fails without pyproject/uv.lock/spec" (ExitsNonZero (Join-Path $wpk "build.ps1") @("-ValidateOnly"))
 
+    # Spec/metadata present but worker entry point absent must still fail.
+    foreach ($n in "pyproject.toml", "uv.lock") { Set-Content (Join-Path $scratch "worker\$n") "x" }
+    Set-Content (Join-Path $wpk "detailframe-worker.spec") "x"
+    Check "worker build fails without entry point" (ExitsNonZero (Join-Path $wpk "build.ps1") @("-ValidateOnly"))
+    $ep = Join-Path $scratch "worker\src\detailframe_worker"
+    New-Item -ItemType Directory -Force $ep | Out-Null
+    Set-Content (Join-Path $ep "__main__.py") "x"
+    Check "worker build passes with entry point" (-not (ExitsNonZero (Join-Path $wpk "build.ps1") @("-ValidateOnly")))
+
     # Machine-path scanner behaviour.
     $art = Join-Path $scratch "art"
     New-Item -ItemType Directory -Force $art | Out-Null
@@ -62,6 +71,22 @@ try {
     Set-Content (Join-Path $art "bad.cfg") 'api_key = abcdef1234567890abcd'
     Check "scanner flags credentials" (ExitsNonZero $scan @("-Root", $art))
     Remove-Item (Join-Path $art "bad.cfg")
+    # Binary artifacts: embedded paths in ASCII and UTF-16LE must be caught; clean binaries pass.
+    $junk = [byte[]](0..255)
+    $bin = Join-Path $art "bin"
+    New-Item -ItemType Directory -Force $bin | Out-Null
+    [IO.File]::WriteAllBytes((Join-Path $bin "clean.dll"), $junk)
+    Check "scanner passes clean binary" (-not (ExitsNonZero $scan @("-Root", $bin)))
+    $ascii = [Text.Encoding]::ASCII.GetBytes("src\" + $repo + "\worker\x.py")
+    $wide = [Text.Encoding]::Unicode.GetBytes('C:\Users\someone\proj\x.cs')
+    $cases = @{ "a.pdb" = ($junk + $ascii + $junk); "b.exe" = ($junk + [byte]0 + $wide + $junk); "c.dll" = ($junk + $wide + $junk) }
+    foreach ($k in $cases.Keys) {
+        [IO.File]::WriteAllBytes((Join-Path $bin "clean.dll"), $junk)
+        Get-ChildItem $bin -Exclude clean.dll | Remove-Item
+        [IO.File]::WriteAllBytes((Join-Path $bin $k), [byte[]]$cases[$k])
+        Check "scanner flags embedded path in $k" (ExitsNonZero $scan @("-Root", $bin))
+    }
+    Remove-Item -Recurse -Force $bin
     Set-Content (Join-Path $art "model.pth") "x"
     Check "scanner flags model weights" (ExitsNonZero $scan @("-Root", $art))
 }
@@ -78,3 +103,4 @@ Check "worker spec exists" (Test-Path (Join-Path $repo "worker\packaging\detailf
 
 if ($failures.Count -gt 0) { "FAILED: $($failures.Count)"; exit 1 }
 "ALL PASSED"
+

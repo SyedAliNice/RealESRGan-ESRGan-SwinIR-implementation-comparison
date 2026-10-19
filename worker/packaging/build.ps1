@@ -8,7 +8,7 @@ $workerRoot = Split-Path -Parent $PSScriptRoot
 $repoRoot = Split-Path -Parent $workerRoot
 
 # Fail early if any repository-managed input is missing; model weights are never bundled or downloaded here.
-foreach ($r in @((Join-Path $workerRoot "pyproject.toml"), (Join-Path $workerRoot "uv.lock"), (Join-Path $PSScriptRoot "detailframe-worker.spec"))) {
+foreach ($r in @((Join-Path $workerRoot "pyproject.toml"), (Join-Path $workerRoot "uv.lock"), (Join-Path $PSScriptRoot "detailframe-worker.spec"), (Join-Path $workerRoot "src\detailframe_worker\__main__.py"))) {
     if (-not (Test-Path -LiteralPath $r -PathType Leaf)) { throw "Missing required worker build input: $r" }
 }
 if ($ValidateOnly) { "Inputs OK"; return }
@@ -40,3 +40,4 @@ finally {
 
 $size = (Get-ChildItem -Recurse -File $target | Measure-Object Length -Sum).Sum / 1MB
 "Built $target ({0:N0} MiB)" -f $size
+
