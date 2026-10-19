@@ -12,11 +12,13 @@ namespace DetailFrame.App.Controls;
 
 public sealed partial class BeforeAfterViewer : UserControl
 {
-    private const double DividerGrabRadius = 24;
+    private const int MaxDecodePixelWidth = 4096;
 
     private readonly ComparisonViewState _state = new();
     private readonly CompositeTransform _originalTransform = new();
     private readonly CompositeTransform _resultTransform = new();
+    private readonly RectangleGeometry _viewportClip = new();
+    private readonly RectangleGeometry _resultClip = new();
     private bool _updating;
     private bool _draggingDivider;
     private bool _panning;
@@ -27,13 +29,15 @@ public sealed partial class BeforeAfterViewer : UserControl
         InitializeComponent();
         OriginalImage.RenderTransform = _originalTransform;
         ResultImage.RenderTransform = _resultTransform;
+        Viewport.Clip = _viewportClip;
+        ResultLayer.Clip = _resultClip;
         Refresh();
     }
 
     public void SetImages(string originalPath, string resultPath)
     {
-        OriginalImage.Source = new BitmapImage(new Uri(originalPath));
-        ResultImage.Source = new BitmapImage(new Uri(resultPath));
+        OriginalImage.Source = LoadBitmap(originalPath);
+        ResultImage.Source = LoadBitmap(resultPath);
         _state.FitToView();
         Refresh();
     }
@@ -42,28 +46,30 @@ public sealed partial class BeforeAfterViewer : UserControl
     {
         OriginalImage.Source = null;
         ResultImage.Source = null;
+        _state.FitToView();
+        Refresh();
     }
 
-    private double Width_ => Viewport.ActualWidth;
+    private static BitmapImage LoadBitmap(string path) =>
+        new(new Uri(path)) { DecodePixelWidth = MaxDecodePixelWidth, DecodePixelType = DecodePixelType.Logical };
 
-    private double Height_ => Viewport.ActualHeight;
+    private double ViewportWidth => Viewport.ActualWidth;
+
+    private double ViewportHeight => Viewport.ActualHeight;
 
     private void Refresh()
     {
-        var w = Width_;
-        var h = Height_;
+        var w = ViewportWidth;
+        var h = ViewportHeight;
         _state.ClampOffset(w, h);
 
         // Both images receive the identical transform so pixels stay aligned at every zoom.
-        foreach (var t in new[] { _originalTransform, _resultTransform })
-        {
-            t.ScaleX = t.ScaleY = _state.Zoom;
-            t.TranslateX = _state.OffsetX;
-            t.TranslateY = _state.OffsetY;
-        }
+        ApplyTransform(_originalTransform);
+        ApplyTransform(_resultTransform);
 
+        _viewportClip.Rect = new Rect(0, 0, w, h);
         var x = _state.Divider * w;
-        ResultLayer.Clip = new RectangleGeometry { Rect = new Rect(x, 0, Math.Max(0, w - x), h) };
+        _resultClip.Rect = new Rect(x, 0, Math.Max(0, w - x), h);
         DividerLine.Margin = new Thickness(x - DividerLine.Width / 2, 0, 0, 0);
         DividerHandle.Margin = new Thickness(x - DividerHandle.Width / 2, 0, 0, 0);
 
@@ -75,6 +81,13 @@ public sealed partial class BeforeAfterViewer : UserControl
         ZoomText.Text = _state.ZoomDescription;
         ZoomOutButton.IsEnabled = _state.Zoom > ComparisonViewState.MinZoom;
         ZoomInButton.IsEnabled = _state.Zoom < ComparisonViewState.MaxZoom;
+    }
+
+    private void ApplyTransform(CompositeTransform t)
+    {
+        t.ScaleX = t.ScaleY = _state.Zoom;
+        t.TranslateX = _state.OffsetX;
+        t.TranslateY = _state.OffsetY;
     }
 
     private void Viewport_SizeChanged(object sender, SizeChangedEventArgs e) => Refresh();
@@ -92,13 +105,13 @@ public sealed partial class BeforeAfterViewer : UserControl
 
     private void ZoomIn_Click(object sender, RoutedEventArgs e)
     {
-        _state.ZoomIn(Width_, Height_);
+        _state.ZoomIn(ViewportWidth, ViewportHeight);
         Refresh();
     }
 
     private void ZoomOut_Click(object sender, RoutedEventArgs e)
     {
-        _state.ZoomOut(Width_, Height_);
+        _state.ZoomOut(ViewportWidth, ViewportHeight);
         Refresh();
     }
 
@@ -111,12 +124,17 @@ public sealed partial class BeforeAfterViewer : UserControl
     private void Viewport_PointerWheelChanged(object sender, PointerRoutedEventArgs e)
     {
         var point = e.GetCurrentPoint(Viewport);
-        var factor = point.Properties.MouseWheelDelta > 0 ? ComparisonViewState.ZoomStep : 1 / ComparisonViewState.ZoomStep;
-        _state.ZoomBy(factor, point.Position.X, point.Position.Y, Width_, Height_);
+        var ctrl = e.KeyModifiers.HasFlag(Windows.System.VirtualKeyModifiers.Control);
+        var action = ViewerInputMapper.MapWheel(point.Properties.MouseWheelDelta, ctrl);
+        if (action == ViewerAction.None)
+        {
+            return;
+        }
+
+        ViewerInputMapper.Apply(_state, action, ViewportWidth, ViewportHeight, point.Position.X, point.Position.Y);
         Refresh();
         e.Handled = true;
     }
-
     private void Viewport_PointerPressed(object sender, PointerRoutedEventArgs e)
     {
         Viewport.Focus(FocusState.Pointer);
@@ -127,11 +145,12 @@ public sealed partial class BeforeAfterViewer : UserControl
         }
 
         _lastPoint = point.Position;
-        _draggingDivider = Math.Abs(point.Position.X - _state.Divider * Width_) <= DividerGrabRadius;
-        _panning = !_draggingDivider && _state.Zoom > ComparisonViewState.MinZoom;
+        var target = ViewerInputMapper.ClassifyPress(point.Position.X, _state.Divider, ViewportWidth, _state.Zoom);
+        _draggingDivider = target == PointerPressTarget.Divider;
+        _panning = target == PointerPressTarget.Pan;
         if (_draggingDivider)
         {
-            _state.SetDividerFromPointer(point.Position.X, Width_);
+            _state.SetDividerFromPointer(point.Position.X, ViewportWidth);
             Refresh();
         }
 
@@ -147,12 +166,12 @@ public sealed partial class BeforeAfterViewer : UserControl
         var position = e.GetCurrentPoint(Viewport).Position;
         if (_draggingDivider)
         {
-            _state.SetDividerFromPointer(position.X, Width_);
+            _state.SetDividerFromPointer(position.X, ViewportWidth);
             Refresh();
         }
         else if (_panning)
         {
-            _state.PanBy(position.X - _lastPoint.X, position.Y - _lastPoint.Y, Width_, Height_);
+            _state.PanBy(position.X - _lastPoint.X, position.Y - _lastPoint.Y, ViewportWidth, ViewportHeight);
             _lastPoint = position;
             Refresh();
         }
@@ -167,32 +186,15 @@ public sealed partial class BeforeAfterViewer : UserControl
 
     private void Viewport_KeyDown(object sender, KeyRoutedEventArgs e)
     {
-        var large = InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.Shift)
+        var shift = InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.Shift)
             .HasFlag(Windows.UI.Core.CoreVirtualKeyStates.Down);
-        switch (e.Key)
+        var action = ViewerInputMapper.MapKey((int)e.Key, shift);
+        if (action == ViewerAction.None)
         {
-            case VirtualKey.Left:
-                _state.NudgeDivider(-1, large);
-                break;
-            case VirtualKey.Right:
-                _state.NudgeDivider(1, large);
-                break;
-            case VirtualKey.Add:
-            case (VirtualKey)187: // '=' / '+'
-                _state.ZoomIn(Width_, Height_);
-                break;
-            case VirtualKey.Subtract:
-            case (VirtualKey)189: // '-'
-                _state.ZoomOut(Width_, Height_);
-                break;
-            case VirtualKey.Number0:
-            case VirtualKey.NumberPad0:
-                _state.FitToView();
-                break;
-            default:
-                return;
+            return;
         }
 
+        ViewerInputMapper.Apply(_state, action, ViewportWidth, ViewportHeight);
         Refresh();
         e.Handled = true;
     }
