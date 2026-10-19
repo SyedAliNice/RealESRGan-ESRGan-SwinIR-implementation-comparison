@@ -1,0 +1,12 @@
+<Window
+    x:Class="DetailFrame.App.MainWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    Title="DetailFrame">
+    <Grid>
+        <TextBlock Text="DetailFrame"
+                   HorizontalAlignment="Center"
+                   VerticalAlignment="Center"
+                   Style="{StaticResource TitleTextBlockStyle}" />
+    </Grid>
+</Window>
