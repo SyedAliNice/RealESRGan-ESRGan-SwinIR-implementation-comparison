@@ -17,16 +17,21 @@
             <views:WorkflowSidebar x:Name="Sidebar" />
         </Border>
 
-        <StackPanel Grid.Column="1"
-                    Padding="32"
-                    Spacing="8"
-                    VerticalAlignment="Top">
-            <TextBlock x:Name="StageTitle"
-                       Style="{StaticResource TitleTextBlockStyle}"
-                       AutomationProperties.HeadingLevel="Level1" />
-            <TextBlock x:Name="StageHint"
-                       Style="{StaticResource BodyTextBlockStyle}"
-                       TextWrapping="Wrap" />
-        </StackPanel>
+        <Grid Grid.Column="1">
+            <StackPanel x:Name="PlaceholderPanel"
+                        Padding="32"
+                        Spacing="8"
+                        VerticalAlignment="Top">
+                <TextBlock x:Name="StageTitle"
+                           Style="{StaticResource TitleTextBlockStyle}"
+                           AutomationProperties.HeadingLevel="Level1" />
+                <TextBlock x:Name="StageHint"
+                           Style="{StaticResource BodyTextBlockStyle}"
+                           TextWrapping="Wrap" />
+            </StackPanel>
+            <ContentControl x:Name="ChooseImageHost"
+                            HorizontalContentAlignment="Stretch"
+                            VerticalContentAlignment="Stretch" />
+        </Grid>
     </Grid>
 </Window>

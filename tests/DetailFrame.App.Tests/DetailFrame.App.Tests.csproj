@@ -1,7 +1,8 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net10.0</TargetFramework>
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+    <Platforms>x64</Platforms>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <IsPackable>false</IsPackable>
@@ -17,6 +18,7 @@
     <!-- Plain C# state is compiled directly so tests need not load the WinUI project. -->
     <Compile Include="..\..\src\DetailFrame.App\Models\WorkflowState.cs" Link="Models\WorkflowState.cs" />
     <Compile Include="..\..\src\DetailFrame.App\Models\WorkflowStage.cs" Link="Models\WorkflowStage.cs" />
+    <Compile Include="..\..\src\DetailFrame.App\Services\ImageInputService.cs" Link="Services\ImageInputService.cs" />
   </ItemGroup>
 
 </Project>
