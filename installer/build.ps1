@@ -27,8 +27,11 @@ if (-not $SkipApp) {
 }
 
 & (Join-Path $PSScriptRoot "verify-artifacts.ps1") -RepoRoot $repoRoot
-& (Join-Path $PSScriptRoot "verify-no-machine-paths.ps1") -Root (Join-Path $repoRoot "artifacts")
-if ($LASTEXITCODE -ne 0) { throw "machine path scan failed" }
+# Scan only the payload the installer packages (not build intermediates).
+foreach ($payload in "artifacts\app\win-x64", "artifacts\worker\win-x64") {
+    & (Join-Path $PSScriptRoot "verify-no-machine-paths.ps1") -Root (Join-Path $repoRoot $payload)
+    if ($LASTEXITCODE -ne 0) { throw "machine path scan failed for $payload" }
+}
 
 $manifestPath = Join-Path $repoRoot "artifacts\installer\release-manifest.json"
 $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json

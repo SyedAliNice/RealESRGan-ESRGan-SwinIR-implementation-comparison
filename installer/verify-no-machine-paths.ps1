@@ -1,7 +1,8 @@
 [CmdletBinding()]
 param(
     [string]$Root = "artifacts",
-    [string[]]$ForbiddenPath = @()
+    [string[]]$ForbiddenPath = @(),
+    [string]$AllowListPath = (Join-Path $PSScriptRoot "machine-path-allowlist.json")
 )
 $ErrorActionPreference = "Stop"
 if (-not (Test-Path -LiteralPath $Root -PathType Container)) { throw "Root not found: $Root" }
@@ -50,6 +51,21 @@ function Find-BinaryPathHits([string]$Path) {
     return $hits
 }
 
+$allow = @()
+if ($AllowListPath -and (Test-Path -LiteralPath $AllowListPath -PathType Leaf)) {
+    $allow = @(Get-Content -LiteralPath $AllowListPath -Raw | ConvertFrom-Json)
+}
+# An allow entry exempts exactly one pattern in exactly one file (path relative to the scanned root).
+function Test-Allowed([string]$Rel, [string]$Pattern) {
+    foreach ($a in $allow) {
+        if ($a.path -ieq ($Rel -replace '\\', '/') -and $a.pattern -eq $Pattern) { return $true }
+    }
+    return $false
+}
+function Add-Problem([string]$Pattern, [string]$Rel, [string]$Message) {
+    if (-not (Test-Allowed $Rel $Pattern)) { $problems.Add($Message) }
+}
+
 $problems = New-Object System.Collections.Generic.List[string]
 foreach ($f in Get-ChildItem -LiteralPath $rootFull -Recurse -File) {
     $rel = $f.FullName.Substring($rootFull.Length).TrimStart('\')
@@ -57,16 +73,16 @@ foreach ($f in Get-ChildItem -LiteralPath $rootFull -Recurse -File) {
     if ($weightExt -contains $ext) { $problems.Add("unverified model file: $rel"); continue }
     if ($textExt -notcontains $ext) {
         # Binaries (exe, dll, pdb, pyd...) can embed source paths: stream-scan ASCII and UTF-16LE forms.
-        foreach ($hit in Find-BinaryPathHits $f.FullName) { $problems.Add("$hit in $rel") }
+        foreach ($hit in Find-BinaryPathHits $f.FullName) { Add-Problem ($hit -replace ' \(binary\)$','') $rel "$hit in $rel" }
         continue
     }
     $text = Get-Content -LiteralPath $f.FullName -Raw -ErrorAction SilentlyContinue
     if (-not $text) { continue }
     foreach ($p in $forbidden) {
-        if ($text.IndexOf($p, [StringComparison]::OrdinalIgnoreCase) -ge 0) { $problems.Add("machine path '$p' in $rel") }
+        if ($text.IndexOf($p, [StringComparison]::OrdinalIgnoreCase) -ge 0) { Add-Problem "machine path" $rel "machine path '$p' in $rel" }
     }
     foreach ($p in $patterns) {
-        if ($text -match $p.Rx) { $problems.Add("$($p.Name) in $rel") }
+        if ($text -match $p.Rx) { Add-Problem $p.Name $rel "$($p.Name) in $rel" }
     }
 }
 

@@ -31,8 +31,7 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "PyInstaller failed" }
 
     $manifest = Join-Path $target "dependency-manifest.txt"
-    uv pip freeze --python $python | Out-File -Encoding ascii $manifest
-    if ($LASTEXITCODE -ne 0) { throw "dependency manifest failed" }
+    & (Join-Path $PSScriptRoot "write-dependency-manifest.ps1") -OutFile $manifest -Python $python
 }
 finally {
     Pop-Location
