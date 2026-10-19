@@ -32,6 +32,18 @@ public sealed class ImageInputServiceTests : IDisposable
         return path;
     }
 
+    // Keeps the signature, IHDR and the start of IDAT, then overwrites the compressed stream.
+    private static byte[] Damage(byte[] png)
+    {
+        var damaged = png[..(png.Length / 2)];
+        for (var i = 80; i < damaged.Length; i++)
+        {
+            damaged[i] = 0xFF;
+        }
+
+        return damaged;
+    }
+
     private string CreateWebP(string name)
     {
         var path = Path.Combine(_dir, name);
@@ -83,6 +95,27 @@ public sealed class ImageInputServiceTests : IDisposable
     {
         var path = Path.Combine(_dir, "bad.png");
         await File.WriteAllBytesAsync(path, [1, 2, 3, 4, 5, 6, 7, 8]);
+        var result = await Service().ValidateDroppedImageAsync(path, default);
+        Assert.Equal(ImageInputFailure.Corrupt, result.Failure);
+    }
+
+    [Fact]
+    public async Task Rejects_valid_header_with_damaged_pixel_data()
+    {
+        var path = Path.Combine(_dir, "damaged.png");
+        using (var stream = new InMemoryRandomAccessStream())
+        {
+            var encoder = await BitmapEncoder.CreateAsync(BitmapEncoder.PngEncoderId, stream);
+            var pixels = new byte[128 * 128 * 4];
+            new Random(1).NextBytes(pixels);
+            encoder.SetPixelData(BitmapPixelFormat.Bgra8, BitmapAlphaMode.Ignore, 128, 128, 96, 96, pixels);
+            await encoder.FlushAsync();
+            stream.Seek(0);
+            var bytes = new byte[stream.Size];
+            await stream.ReadAsync(bytes.AsBuffer(), (uint)stream.Size, InputStreamOptions.None);
+            await File.WriteAllBytesAsync(path, Damage(bytes));
+        }
+
         var result = await Service().ValidateDroppedImageAsync(path, default);
         Assert.Equal(ImageInputFailure.Corrupt, result.Failure);
     }

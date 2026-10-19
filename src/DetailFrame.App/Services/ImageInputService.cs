@@ -43,6 +43,7 @@ public sealed record ImageSelectionResult
 public sealed class ImageInputService
 {
     public const long DefaultMaxPixels = 100_000_000;
+    private const int ProbeMaxDimension = 256;
 
     private static readonly string[] SupportedList = ["PNG", "JPEG", "WebP"];
 
@@ -87,54 +88,66 @@ public sealed class ImageInputService
             return ImageSelectionResult.Failed(ImageInputFailure.WebPCodecMissing, WebPCodecMessage);
         }
 
-        BitmapDecoder decoder;
         try
         {
             var file = await StorageFile.GetFileFromPathAsync(Path.GetFullPath(path)).AsTask(cancellationToken);
             using var stream = await file.OpenReadAsync().AsTask(cancellationToken);
-            decoder = await BitmapDecoder.CreateAsync(stream).AsTask(cancellationToken);
+            var decoder = await BitmapDecoder.CreateAsync(stream).AsTask(cancellationToken);
+
+            var decoded = DetectFormat(decoder);
+            if (decoded is null)
+            {
+                return ImageSelectionResult.Failed(
+                    ImageInputFailure.UnsupportedFormat,
+                    $"The image content is not a supported format. Choose a {string.Join(", ", SupportedList)} image.");
+            }
+
+            if (decoded != expected)
+            {
+                return ImageSelectionResult.Failed(
+                    ImageInputFailure.FormatMismatch,
+                    $"The file extension says {expected} but the content is {decoded}. Rename or re-export the file.");
+            }
+
+            var width = (long)decoder.PixelWidth;
+            var height = (long)decoder.PixelHeight;
+            if (width <= 0 || height <= 0 || width > int.MaxValue || height > int.MaxValue)
+            {
+                return ImageSelectionResult.Failed(ImageInputFailure.Corrupt, "The image has no pixels.");
+            }
+
+            if (width * height > _maxPixels)
+            {
+                return ImageSelectionResult.Failed(
+                    ImageInputFailure.TooLarge,
+                    $"The image is {width}×{height} pixels, which exceeds the limit of {_maxPixels / 1_000_000} megapixels.");
+            }
+
+            // Dimensions are within the cap; decode a scaled-down copy so damaged pixel data is detected without a full-size allocation.
+            var scale = Math.Min(1.0, (double)ProbeMaxDimension / Math.Max(width, height));
+            var transform = new BitmapTransform
+            {
+                ScaledWidth = (uint)Math.Max(1, (long)(width * scale)),
+                ScaledHeight = (uint)Math.Max(1, (long)(height * scale)),
+            };
+            await decoder.GetPixelDataAsync(
+                BitmapPixelFormat.Bgra8,
+                BitmapAlphaMode.Ignore,
+                transform,
+                ExifOrientationMode.IgnoreExifOrientation,
+                ColorManagementMode.DoNotColorManage).AsTask(cancellationToken);
+
+            return ImageSelectionResult.Accepted(Path.GetFullPath(path), decoded.Value, (int)width, (int)height);
         }
         catch (OperationCanceledException)
         {
             throw;
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Runtime.InteropServices.COMException or ArgumentException)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Runtime.InteropServices.COMException or ArgumentException or InvalidOperationException)
         {
             return ImageSelectionResult.Failed(ImageInputFailure.Corrupt, "The file could not be read as an image. It may be damaged.");
         }
-
-        var decoded = DetectFormat(decoder);
-        if (decoded is null)
-        {
-            return ImageSelectionResult.Failed(
-                ImageInputFailure.UnsupportedFormat,
-                $"The image content is not a supported format. Choose a {string.Join(", ", SupportedList)} image.");
-        }
-
-        if (decoded != expected)
-        {
-            return ImageSelectionResult.Failed(
-                ImageInputFailure.FormatMismatch,
-                $"The file extension says {expected} but the content is {decoded}. Rename or re-export the file.");
-        }
-
-        var width = (int)decoder.PixelWidth;
-        var height = (int)decoder.PixelHeight;
-        if (width <= 0 || height <= 0)
-        {
-            return ImageSelectionResult.Failed(ImageInputFailure.Corrupt, "The image has no pixels.");
-        }
-
-        if ((long)width * height > _maxPixels)
-        {
-            return ImageSelectionResult.Failed(
-                ImageInputFailure.TooLarge,
-                $"The image is {width}×{height} pixels, which exceeds the limit of {_maxPixels / 1_000_000} megapixels.");
-        }
-
-        return ImageSelectionResult.Accepted(Path.GetFullPath(path), decoded.Value, width, height);
     }
-
     public const string WebPCodecMessage =
         "WebP images need the Microsoft \"WebP Image Extensions\" codec, which is not installed. "
         + "Install it from the Microsoft Store, or choose a PNG or JPEG image.";
