@@ -59,7 +59,7 @@ def _job_failure(job_id: UUID, code: str, message: str) -> dict[str, object]:
 def _execute_enhance(
     request: EnhanceRequest,
     models_dir: Path,
-    cancellation_requested: threading.Event,
+    cancellation_requested: engine.CancellationToken,
     progress: Callable[[str, float], None],
 ) -> dict[str, object]:
     if cancellation_requested.is_set():
@@ -77,7 +77,7 @@ def _execute_enhance(
             output_path=Path(request.output_path),
             output_format=request.output_format,
             progress=progress,
-            cancelled=cancellation_requested.is_set,
+            cancelled=cancellation_requested,
             models_dir=models_dir,
         )
     except engine.EnhanceCancelled:
@@ -101,7 +101,7 @@ def _execute_enhance(
 @dataclass
 class _ActiveJob:
     job_id: UUID
-    cancellation_requested: threading.Event
+    cancellation_requested: engine.CancellationToken
     thread: threading.Thread
 
 
@@ -111,7 +111,7 @@ def _start_job(
     stderr: TextIO,
     events: queue.Queue[tuple[str, object]],
 ) -> _ActiveJob:
-    cancellation_requested = threading.Event()
+    cancellation_requested = engine.CancellationToken()
 
     def execute() -> None:
         try:

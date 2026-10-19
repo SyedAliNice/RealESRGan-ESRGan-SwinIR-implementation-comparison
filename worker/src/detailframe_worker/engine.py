@@ -3,6 +3,7 @@ import io
 import json
 import os
 import tempfile
+import threading
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -28,6 +29,30 @@ OUTPUT_FORMATS = {"png": "PNG", "jpeg": "JPEG", "jpg": "JPEG", "webp": "WEBP"}
 
 class EnhanceCancelled(Exception):
     pass
+
+
+class CancellationToken:
+    def __init__(self) -> None:
+        self._event = threading.Event()
+        self._commit_lock = threading.Lock()
+
+    def __call__(self) -> bool:
+        return self.is_set()
+
+    def is_set(self) -> bool:
+        return self._event.is_set()
+
+    def set(self) -> None:
+        with self._commit_lock:
+            self._event.set()
+
+    def wait(self, timeout: float | None = None) -> bool:
+        return self._event.wait(timeout)
+
+    def publish(self, publish: Callable[[], None]) -> None:
+        with self._commit_lock:
+            _check_cancelled(self)
+            publish()
 
 
 @dataclass(frozen=True)
@@ -241,10 +266,15 @@ def enhance(
             (image_info.width * scale, image_info.height * scale),
             format_name,
         )
-        _check_cancelled(cancelled)
-        progress("encoding", 1.0)
-        os.replace(temporary_path, output_path)
+        publish = lambda: os.replace(temporary_path, output_path)
+        synchronized_publish = getattr(cancelled, "publish", None)
+        if callable(synchronized_publish):
+            synchronized_publish(publish)
+        else:
+            _check_cancelled(cancelled)
+            publish()
         temporary_path = None
+        progress("encoding", 1.0)
     except EnhanceCancelled:
         raise
     except ProtocolError:

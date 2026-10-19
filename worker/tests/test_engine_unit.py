@@ -304,3 +304,25 @@ def test_failed_encode_leaves_existing_result_and_no_temporary_file(
     assert error.value.code == "OUTPUT_FAILED"
     assert existing.read_bytes() == b"earlier result"
     assert sorted(entry.name for entry in tmp_path.iterdir()) == ["out.png", "source.png"]
+
+
+def test_replace_failure_does_not_report_complete_progress(
+    tmp_path, source, model, monkeypatch
+):
+    path, _ = source
+    existing = tmp_path / "out.png"
+    existing.write_bytes(b"earlier result")
+    reported = []
+
+    def fail_replace(_temporary, _output):
+        raise OSError("publication failed")
+
+    monkeypatch.setattr(engine.os, "replace", fail_replace)
+
+    with pytest.raises(ProtocolError) as error:
+        run(tmp_path, path, progress=lambda stage, fraction: reported.append((stage, fraction)))
+
+    assert error.value.code == "INFERENCE_FAILED"
+    assert ("encoding", 1.0) not in reported
+    assert existing.read_bytes() == b"earlier result"
+    assert sorted(entry.name for entry in tmp_path.iterdir()) == ["out.png", "source.png"]

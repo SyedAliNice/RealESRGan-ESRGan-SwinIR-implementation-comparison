@@ -156,6 +156,72 @@ def test_worker_cancellation_is_terminal_and_removes_partial_output(monkeypatch,
     assert stderr.getvalue() == ""
 
 
+def test_cancellation_racing_atomic_publish_completes_after_commit(monkeypatch, tmp_path):
+    source = tmp_path / "source.png"
+    Image.new("RGB", (8, 8), "red").save(source)
+    output = tmp_path / "result.png"
+    publish_entered = threading.Event()
+    release_publish = threading.Event()
+    cancellation_attempted = threading.Event()
+    original_replace = engine.os.replace
+    original_set = engine.CancellationToken.set
+
+    def blocking_replace(temporary, destination):
+        publish_entered.set()
+        assert release_publish.wait(timeout=3)
+        original_replace(temporary, destination)
+
+    def record_cancellation(token):
+        cancellation_attempted.set()
+        original_set(token)
+
+    monkeypatch.setattr(engine.os, "replace", blocking_replace)
+    monkeypatch.setattr(engine.CancellationToken, "set", record_cancellation)
+    monkeypatch.setattr(engine, "load_catalog", lambda _path: (_test_variant(),))
+    monkeypatch.setattr(engine, "_load_state_dict", lambda _variant, _directory: {})
+    monkeypatch.setitem(
+        engine.ADAPTERS,
+        "test-nearest",
+        engine.ModelAdapter(lambda _variant, _state: NearestUpscaler()),
+    )
+
+    stdin = OpenInput()
+    stdout = SignallingOutput()
+    stderr = io.StringIO()
+    result = []
+    worker_thread = threading.Thread(
+        target=lambda: result.append(run_worker(stdin, stdout, stderr, tmp_path))
+    )
+    worker_thread.start()
+    stdin.lines.put(_request(source, output))
+    assert publish_entered.wait(timeout=2)
+    stdin.lines.put(
+        json.dumps({"protocol_version": 1, "type": "cancel", "job_id": JOB_ID}) + "\n"
+    )
+    assert cancellation_attempted.wait(timeout=2)
+    assert not output.exists()
+    release_publish.set()
+
+    assert _wait_for_event(stdout, "complete")
+    terminal = [
+        event
+        for event in _events(stdout)
+        if event["type"] in {"complete", "failure", "cancelled"}
+    ]
+    assert len(terminal) == 1
+    assert terminal[0]["type"] == "complete"
+    assert output.exists()
+    assert any(
+        event["type"] == "progress" and event["stage"] == "encoding" and event["progress"] == 1.0
+        for event in _events(stdout)
+    )
+    stdin.lines.put(None)
+    worker_thread.join(timeout=2)
+    assert not worker_thread.is_alive()
+    assert result == [0]
+    assert stderr.getvalue() == ""
+
+
 def test_empty_production_catalog_fails_without_output(tmp_path):
     models_dir = tmp_path / "models"
     models_dir.mkdir()
