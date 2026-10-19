@@ -87,3 +87,12 @@ def test_capabilities_advertise_only_validated_devices(tmp_path, monkeypatch):
 
     monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
     assert capabilities_devices(tmp_path) == ["cpu"]
+
+
+def test_auto_without_validated_cpu_or_cuda_is_device_unavailable(monkeypatch):
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+    cuda_only = dataclasses.replace(variant(), devices=("cuda",))
+
+    with pytest.raises(ProtocolError) as error:
+        engine.resolve_device("auto", cuda_only)
+    assert error.value.code == "DEVICE_UNAVAILABLE"

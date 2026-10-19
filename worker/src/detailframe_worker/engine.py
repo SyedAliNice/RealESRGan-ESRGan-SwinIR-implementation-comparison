@@ -103,7 +103,10 @@ def variant_devices(variant: ModelVariant) -> tuple[str, ...]:
 def resolve_device(requested: str, variant: ModelVariant) -> str:
     available = variant_devices(variant)
     if requested == "auto":
-        return "cuda" if "cuda" in available else "cpu"
+        for name in ("cuda", "cpu"):
+            if name in available:
+                return name
+        raise ProtocolError("DEVICE_UNAVAILABLE", "No validated device is available for this model")
     if requested not in available:
         raise ProtocolError(
             "DEVICE_UNAVAILABLE", f"The {requested} device is unavailable for this model"

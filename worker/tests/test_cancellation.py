@@ -151,3 +151,51 @@ def test_worker_reports_cancel_for_inactive_job_as_error(tmp_path):
 
     events = [json.loads(item) for item in stdout.getvalue().splitlines()]
     assert [e["code"] for e in events] == ["JOB_NOT_ACTIVE"]
+
+
+def test_cancel_request_reaches_active_worker_job(tmp_path, paths, monkeypatch):
+    from detailframe_worker.worker import run_worker
+
+    started, release = threading.Event(), threading.Event()
+
+    class Blocking(torch.nn.Module):
+        def forward(self, tensor):
+            started.set()
+            assert release.wait(5)
+            return torch.nn.functional.interpolate(tensor, scale_factor=2, mode="nearest")
+
+    monkeypatch.setitem(engine.ADAPTERS, "test-nearest", ModelAdapter(lambda _v, _s: Blocking()))
+    lines = queue.Queue()
+
+    class Stdin:
+        def __iter__(self):
+            while (item := lines.get()) is not None:
+                yield item
+
+    source, output = paths
+    enhance = {
+        "protocol_version": 1, "type": "enhance", "job_id": str(JOB_ID),
+        "model_id": "test-model", "scale": 2, "device": "cpu",
+        "input_path": str(source), "output_path": str(output), "output_format": "png",
+    }
+    stdout = io.StringIO()
+    result = []
+    thread = threading.Thread(
+        target=lambda: result.append(run_worker(Stdin(), stdout, io.StringIO(), tmp_path))
+    )
+    thread.start()
+    lines.put(json.dumps(enhance) + "\n")
+    assert started.wait(5)
+    lines.put(json.dumps({"protocol_version": 1, "type": "cancel", "job_id": str(JOB_ID)}) + "\n")
+    release.set()
+    for _ in range(100):
+        if '"cancelled"' in stdout.getvalue() or '"complete"' in stdout.getvalue():
+            break
+        threading.Event().wait(0.05)
+    lines.put(None)
+    thread.join(10)
+
+    events = [json.loads(item) for item in stdout.getvalue().splitlines()]
+    assert result == [0]
+    assert [e["type"] for e in events if e["type"] != "progress"] == ["cancelled"]
+    assert_clean(tmp_path, output)
