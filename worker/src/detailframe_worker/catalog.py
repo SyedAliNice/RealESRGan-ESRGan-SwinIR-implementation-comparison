@@ -1,5 +1,7 @@
 import hashlib
+import ipaddress
 import json
+import re
 from dataclasses import dataclass
 from importlib import resources
 from pathlib import Path
@@ -53,18 +55,84 @@ class ModelVariant:
 
 
 def _is_https_url(value: str) -> bool:
+    if not isinstance(value, str) or not value:
+        return False
+    if any(
+        character.isspace() or ord(character) < 0x20 or ord(character) == 0x7F
+        for character in value
+    ):
+        return False
+
     try:
         parsed = urlsplit(value)
         port = parsed.port
-        return (
-            parsed.scheme == "https"
-            and bool(parsed.hostname)
-            and parsed.username is None
-            and parsed.password is None
-            and bool(parsed.path and parsed.path != "/")
-            and (port is None or 1 <= port <= 65535)
-        )
-    except ValueError:
+        if (
+            parsed.scheme.lower() != "https"
+            or not parsed.netloc
+            or parsed.username is not None
+            or parsed.password is not None
+            or "@" in parsed.netloc
+            or "\\" in parsed.netloc
+            or not parsed.path
+            or parsed.path == "/"
+            or (port is not None and not 1 <= port <= 65535)
+        ):
+            return False
+
+        hostname = parsed.hostname
+        if not hostname or "%" in hostname:
+            return False
+
+        if parsed.netloc.startswith("["):
+            closing_bracket = parsed.netloc.find("]")
+            if closing_bracket < 0:
+                return False
+            port_suffix = parsed.netloc[closing_bracket + 1 :]
+            if port_suffix and re.fullmatch(r":[0-9]+", port_suffix) is None:
+                return False
+            ipaddress.IPv6Address(hostname)
+            return True
+
+        if "[" in parsed.netloc or "]" in parsed.netloc or ":" in hostname:
+            return False
+        if parsed.netloc.count(":") > 1:
+            return False
+        if ":" in parsed.netloc:
+            raw_port = parsed.netloc.rsplit(":", 1)[1]
+            if not raw_port.isascii() or not raw_port.isdigit():
+                return False
+
+        ascii_hostname = hostname.encode("idna").decode("ascii").lower()
+        if ascii_hostname.endswith("."):
+            ascii_hostname = ascii_hostname[:-1]
+        if not ascii_hostname or len(ascii_hostname) > 253:
+            return False
+
+        labels = ascii_hostname.split(".")
+        for label in labels:
+            if (
+                not label
+                or len(label) > 63
+                or not label[0].isalnum()
+                or not label[-1].isalnum()
+                or any(
+                    not (
+                        character.isascii()
+                        and (character.isalnum() or character == "-")
+                    )
+                    for character in label
+                )
+            ):
+                return False
+            if label.startswith("xn--"):
+                decoded_label = label.encode("ascii").decode("idna")
+                if decoded_label.encode("idna").decode("ascii").lower() != label:
+                    return False
+
+        if all(character.isdigit() or character == "." for character in ascii_hostname):
+            ipaddress.IPv4Address(ascii_hostname)
+        return True
+    except (UnicodeError, ValueError):
         return False
 
 

@@ -31,7 +31,7 @@
     "weight_url": {
       "type": "string",
       "format": "https-url",
-      "pattern": "^https://[^/@?#\\s]+(?:[/?#]|$)"
+      "pattern": "^(?i:https)://[^/@?#\\\\\\s]+(?:[/?#]|$)"
     },
     "license": {
       "type": "string",
@@ -40,7 +40,7 @@
     "provenance_url": {
       "type": "string",
       "format": "https-url",
-      "pattern": "^https://[^/@?#\\s]+(?:[/?#]|$)"
+      "pattern": "^(?i:https)://[^/@?#\\\\\\s]+(?:[/?#]|$)"
     },
     "architecture": {
       "type": "string",

@@ -68,7 +68,7 @@
         "weight_url": {
           "type": "string",
           "format": "https-url",
-          "pattern": "^https://[^/@?#\\s]+(?:[/?#]|$)"
+          "pattern": "^(?i:https)://[^/@?#\\\\\\s]+(?:[/?#]|$)"
         },
         "sha256": {
           "$ref": "#/$defs/sha256"
@@ -80,7 +80,7 @@
         "provenance_url": {
           "type": "string",
           "format": "https-url",
-          "pattern": "^https://[^/@?#\\s]+(?:[/?#]|$)"
+          "pattern": "^(?i:https)://[^/@?#\\\\\\s]+(?:[/?#]|$)"
         },
         "size_bytes": {
           "type": "integer",

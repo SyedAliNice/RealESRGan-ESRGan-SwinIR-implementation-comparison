@@ -202,6 +202,21 @@ def test_rejects_windows_reserved_device_filenames(filename, tmp_path):
         "https://models.example.com",
         "https://user:pass@models.example.com/file",
         "https://:pass@models.example.com/file",
+        "https://models.example.com\\evil/file",
+        "https://models example.com/file",
+        "https://-models.example.com/file",
+        "https://models-.example.com/file",
+        "https://models..example.com/file",
+        "https://models_example.com/file",
+        "https://[::1/file",
+        "https://[not-an-ip]/file",
+        "https://[192.0.2.1]/file",
+        "https://::1/file",
+        "https://999.999.1.1/file",
+        "https://models.example.com:/file",
+        "https://models.example.com:0/file",
+        "https://models.example.com:65536/file",
+        "https://models.example.com:443:444/file",
     ],
 )
 @pytest.mark.parametrize("field", ["weight_url", "provenance_url"])
@@ -212,6 +227,25 @@ def test_rejects_https_urls_without_host_or_with_credentials(url, field, tmp_pat
 
     with pytest.raises(CatalogValidationError):
         load_catalog(write_catalog(tmp_path / field, [entry]))
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "HTTPS://models.example.com:8443/file?token=example#download",
+        "https://xn--bcher-kva.example/file",
+        "https://bücher.example/file",
+        "https://192.0.2.1/file",
+        "https://[2001:db8::1]:443/file",
+    ],
+)
+@pytest.mark.parametrize("field", ["weight_url", "provenance_url"])
+def test_accepts_valid_https_hosts_and_resource_urls(url, field, tmp_path):
+    entry = valid_entry()
+    entry["enabled"] = False
+    entry[field] = url
+
+    assert len(load_catalog(write_catalog(tmp_path / field, [entry]))) == 1
 
 
 @pytest.mark.parametrize(

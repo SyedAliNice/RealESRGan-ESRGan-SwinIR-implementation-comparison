@@ -221,3 +221,74 @@ Reviewed malformed-port handling, scheme/host/credential/path requirements,
 resource loading from the package, and package-data configuration. The
 production catalog and reviewed-manifest allowlist remain empty; no models
 were enabled. Plans and ledgers remain untouched.
+
+## Reviewer fix round 3
+
+HTTPS URL validation now compares the parsed scheme case-insensitively and
+validates the authority instead of trusting `urlsplit().hostname`. It rejects
+backslashes and raw whitespace, credentials, malformed DNS labels and
+characters, invalid punycode, malformed IPv4/IPv6 literals, bracket misuse,
+empty/non-numeric/out-of-range ports, and extra authority colons. DNS names are
+validated after IDNA encoding, so valid Unicode IDNs and their punycode forms
+remain supported. The shared catalog schema and both copies of the validation
+manifest schema now use a case-insensitive HTTPS pattern that also excludes
+backslashes and whitespace from the authority. Existing path, query, and
+fragment behavior is preserved.
+
+Focused tests cover rejected malformed hosts and ports for both URL fields,
+plus acceptance of case-insensitive HTTPS, valid ports, IDN and punycode,
+IPv4/IPv6 literals, and resource paths containing query/fragment components.
+The empty catalog, packaged manifest schema loading, and empty reviewed
+manifest allowlist remain unchanged; no models are enabled.
+
+**Focused catalog and checkpoint validation**
+
+Command:
+
+```text
+uv run --project worker --python 3.14 --extra dev python -m pytest worker/tests/test_catalog.py worker/tests/test_checkpoint_validation.py -q
+```
+
+Output:
+
+```text
+........................................................................ [ 78%]
+....................                                                     [100%]
+92 passed in 4.04s
+```
+
+**Full worker suite**
+
+Command:
+
+```text
+uv run --project worker --python 3.14 --extra dev python -m pytest worker/tests -q
+```
+
+Output:
+
+```text
+........................................................................ [ 56%]
+.......................................................                  [100%]
+127 passed in 3.94s
+```
+
+**Patch hygiene**
+
+Command:
+
+```text
+git diff --check
+```
+
+Output: `git diff --check: passed`.
+
+**Self-review**
+
+Reviewed URL scheme parsing, authority and port handling, DNS/IDNA/IP
+validation, schema parity, and the focused acceptance/rejection cases.
+Confirmed `shared/models.json` still contains an empty version-1 catalog and
+`REVIEWED_VALIDATION_MANIFESTS` remains empty. The packaged manifest schema is
+still loaded through `importlib.resources`. Only Task 4 URL validation,
+schemas, tests, and this report are changed; untracked plan documents and
+ledgers remain untouched.
