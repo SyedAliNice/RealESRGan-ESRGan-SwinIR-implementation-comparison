@@ -10,6 +10,8 @@ public sealed partial class MainWindow : Window
     private readonly ThemeService _theme;
     private readonly ChooseImagePage _chooseImage;
     private readonly ConfigurePage _configure;
+    private readonly EnhancePage _enhance;
+    private readonly EnhancementCoordinator _coordinator;
     private WorkflowState _state = WorkflowState.Empty;
 
     public MainWindow()
@@ -38,6 +40,21 @@ public sealed partial class MainWindow : Window
                 SelectedDevice = s.Device,
             });
         ConfigureHost.Content = _configure;
+        var modelsDir = ModelDownloadService.DefaultCacheRoot;
+        Directory.CreateDirectory(modelsDir);
+        var launcher = ProcessWorkerLauncher.Locate(modelsDir)
+            ?? new ProcessWorkerLauncher(Path.Combine(AppContext.BaseDirectory, "worker", "detailframe-worker.exe"), modelsDir);
+        _coordinator = new EnhancementCoordinator(
+            new WorkerProcessClient(launcher),
+            EnhancementCoordinator.DecodeWithWindowsAsync,
+            EnhancementCoordinator.DefaultWorkRoot);
+        _coordinator.CleanupStaleWork();
+        Closed += (_, _) => _coordinator.Dispose();
+        _enhance = new EnhancePage(_coordinator);
+        _enhance.JobStarted += (_, _) => UpdateState(_state with { ActiveJobId = _coordinator.ActiveJobId?.ToString() ?? "pending" });
+        _enhance.JobFinished += (_, result) =>
+            UpdateState(_state with { ActiveJobId = null, ResultPath = result?.Path ?? _state.ResultPath });
+        EnhanceHost.Content = _enhance;
         Sidebar.State = _state;
         ShowStage(WorkflowStage.ChooseImage);
     }
@@ -48,15 +65,18 @@ public sealed partial class MainWindow : Window
     {
         _state = state;
         Sidebar.State = state;
+        _enhance?.SetState(state);
     }
 
     private async void ShowStage(WorkflowStage stage)
     {
         var isChoose = stage == WorkflowStage.ChooseImage;
         var isConfigure = stage == WorkflowStage.Configure;
+        var isEnhance = stage == WorkflowStage.Enhance;
         ChooseImageHost.Visibility = isChoose ? Visibility.Visible : Visibility.Collapsed;
         ConfigureHost.Visibility = isConfigure ? Visibility.Visible : Visibility.Collapsed;
-        PlaceholderPanel.Visibility = isChoose || isConfigure ? Visibility.Collapsed : Visibility.Visible;
+        EnhanceHost.Visibility = isEnhance ? Visibility.Visible : Visibility.Collapsed;
+        PlaceholderPanel.Visibility = isChoose || isConfigure || isEnhance ? Visibility.Collapsed : Visibility.Visible;
         StageTitle.Text = WorkflowStages.Title(stage);
         StageHint.Text = "This step is not implemented yet.";
         Sidebar.CurrentStage = stage;
