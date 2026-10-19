@@ -84,8 +84,27 @@ public sealed partial class ChooseImagePage : UserControl
             var result = await action(cts.Token);
             if (result.IsAccepted)
             {
+                BitmapImage bitmap;
+                try
+                {
+                    var file = await StorageFile.GetFileFromPathAsync(result.Path!);
+                    using var stream = await file.OpenReadAsync();
+                    bitmap = new BitmapImage { DecodePixelWidth = 1280 };
+                    await bitmap.SetSourceAsync(stream);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    ShowError("The image preview could not be loaded.");
+                    return;
+                }
+
+                if (cts.IsCancellationRequested)
+                {
+                    return;
+                }
+
                 ErrorBar.IsOpen = false;
-                Preview.Source = new BitmapImage(new Uri(result.Path!));
+                Preview.Source = bitmap;
                 Preview.Visibility = Visibility.Visible;
                 Prompt.Visibility = Visibility.Collapsed;
                 Details.Text = $"{System.IO.Path.GetFileName(result.Path)} · {result.Format} · {result.Width}×{result.Height}";
