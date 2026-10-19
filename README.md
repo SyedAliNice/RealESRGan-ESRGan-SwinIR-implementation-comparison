@@ -70,3 +70,27 @@ Run the appropriate notebook and execute the inference code:
 
         python enhance.py --input image.jpg --model real-esrgan
 Change real-esrgan to esrgan or swinir as needed.
+
+
+# 🪟 DetailFrame for Windows (WinUI 3 shell)
+
+Build and test (Windows 10 1809+ / Windows 11, .NET 10 SDK):
+
+    dotnet test DetailFrame.sln
+    dotnet build src/DetailFrame.App/DetailFrame.App.csproj -c Release -p:Platform=x64
+    src\DetailFrame.App\bin\x64\Release\net10.0-windows10.0.19041.0\DetailFrame.App.exe
+
+Branding assets live in `src/DetailFrame.App/Assets/Branding/` (ICO, SVG, PNG 16-256 px). Provenance and SHA-256 hashes are in `SOURCES.sha256` there; the ICO is also the executable and window icon.
+
+The shipped model catalog (`shared/models.json`) is currently empty, so no real enhancement can run yet; the workflow is covered by tests with a fake worker.
+
+## Windows 11 manual acceptance checklist
+
+- [ ] App launches; window and taskbar show the DetailFrame icon.
+- [ ] Theme follows Light / Dark / High contrast switches while running.
+- [ ] Keyboard only: Tab reaches sidebar, every page control and the comparison viewport; Enter/Space activate; focus is always visible.
+- [ ] Choose image: picker and drag-and-drop accept PNG, JPEG and WebP; other files show a readable error.
+- [ ] Enhance: progress is announced, Cancel stops the job, a failed or cancelled run keeps the previous result.
+- [ ] Compare: arrow keys move the divider, + / - / 0 zoom, wipe and zoom stay synchronized between both images.
+- [ ] Save As: PNG, JPEG and WebP write the file; a missing WebP codec shows an actionable message.
+- [ ] Error states are readable with Narrator and do not rely on colour alone.

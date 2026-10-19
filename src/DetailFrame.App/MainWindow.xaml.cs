@@ -24,6 +24,12 @@ public sealed partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        var iconPath = Path.Combine(AppContext.BaseDirectory, "Assets", "Branding", "app.ico");
+        if (File.Exists(iconPath))
+        {
+            AppWindow.SetIcon(iconPath);
+        }
+
         _theme = new ThemeService(RootGrid);
         Closed += (_, _) => _theme.Dispose();
         Sidebar.StageRequested += (_, stage) => ShowStage(stage);

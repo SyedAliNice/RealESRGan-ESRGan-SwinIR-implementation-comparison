@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256"><title>DetailFrame</title>
+<rect x="12" y="12" width="232" height="232" rx="46" fill="#005fb8"/>
+<g fill="none" stroke="white" stroke-width="12" stroke-linejoin="round">
+<path d="M60 172V60H172M84 196H196V84"/></g>
+<path d="M112 160V112H160" fill="none" stroke="#a9deff" stroke-width="12" stroke-linejoin="round"/></svg>
