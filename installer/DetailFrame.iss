@@ -32,7 +32,7 @@ Name: "startmenuicon"; Description: "Create a &Start Menu shortcut"; GroupDescri
 Name: "desktopicon"; Description: "Create a &desktop shortcut"; GroupDescription: "Shortcuts:"; Flags: unchecked
 
 [Files]
-; Application and CPU worker only. GPU libraries, settings and model weights are not installed.
+; The payload is the application and CPU-only worker; model weights are never bundled.
 Source: "{#RepoRoot}artifacts\app\win-x64\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs ignoreversion
 Source: "{#RepoRoot}artifacts\worker\win-x64\*"; DestDir: "{app}\worker"; Flags: recursesubdirs createallsubdirs ignoreversion
 Source: "{#RepoRoot}installer\prerequisites.ps1"; Flags: dontcopy

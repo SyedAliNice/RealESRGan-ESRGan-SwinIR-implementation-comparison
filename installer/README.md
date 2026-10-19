@@ -52,3 +52,17 @@ Bootstrapper evidence (2026-10-20): `https://aka.ms/windowsappsdk/2.5/2.5.1/wind
 Alternatives: if the single-`.exe` bootstrapper proves unreliable, compare MSIX packaging (runtime resolved via package dependency, but different uninstall/sideload story) before replacing Inno Setup. No change was made.
 
 Exit codes of `prerequisites.ps1`: 0 ok, 10 unsupported OS, 11 unsupported architecture, 12 runtime install failed, 20 runtime missing (`-ProbeOnly`).
+
+## CPU baseline and optional acceleration (Task 4)
+
+The CPU-only baseline installer contains the WinUI application and the packaged worker built against the CPU PyTorch runtime. Users do not need a system Python installation. The installer does not bundle model weights; enabled models are downloaded explicitly and verified by the app before they are installed in the per-user cache. A missing weight is presented as a download requirement, not as a failed inference attempt.
+
+CUDA is **not currently offered**. There is no release-validated CUDA package, supported driver/runtime matrix, or per-model CUDA validation evidence in this repository. The baseline installer therefore has no CUDA component or CUDA payload. Do not add an installer selection until a supported driver/runtime matrix and passing CUDA validation for every advertised model are documented and the optional payload is separately staged and tested. This keeps CPU launch and inference independent of CUDA.
+
+Build the release installer with:
+
+```powershell
+pwsh -File installer/build.ps1 -Configuration Release
+```
+
+This command builds and verifies the app/worker artifacts, compiles `DetailFrame.iss` with `ISCC.exe`, then verifies the resulting setup executable. Inno Setup 6.3+ must be installed separately and `ISCC.exe` must be available on `PATH`. The compiler is not installed in the current build environment, so the setup executable remains an unverified release gate here; do not treat static checks as an installer build or clean-machine install test. Verify staged package contents with `pwsh -File installer/verify-artifacts.ps1` and scan for machine paths and unverified weights with `pwsh -File installer/verify-no-machine-paths.ps1 -Root artifacts`.
