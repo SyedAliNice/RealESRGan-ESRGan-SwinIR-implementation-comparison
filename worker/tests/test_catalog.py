@@ -91,6 +91,14 @@ def test_loads_empty_version_one_catalog():
     assert load_catalog(SHARED_ROOT / "models.json") == ()
 
 
+def test_loads_empty_catalog_without_adjacent_manifest_schema(tmp_path):
+    shutil.copyfile(SHARED_ROOT / "models.schema.json", tmp_path / "models.schema.json")
+    path = tmp_path / "models.json"
+    path.write_text(json.dumps({"schema_version": 1, "models": []}), encoding="utf-8")
+
+    assert load_catalog(path) == ()
+
+
 def test_loads_catalog_variant_only_with_test_trusted_manifest(tmp_path, monkeypatch):
     entry = valid_entry()
     path = write_catalog(tmp_path, [entry])
@@ -189,6 +197,9 @@ def test_rejects_windows_reserved_device_filenames(filename, tmp_path):
         "https://",
         "https:///missing-host",
         "https://user@models.example.com/file",
+        "https://models.example.com:bad/file",
+        "https://models.example.com:99999/file",
+        "https://models.example.com",
         "https://user:pass@models.example.com/file",
         "https://:pass@models.example.com/file",
     ],

@@ -1,6 +1,7 @@
 import hashlib
 import json
 from dataclasses import dataclass
+from importlib import resources
 from pathlib import Path
 from typing import Any, BinaryIO
 from urllib.parse import urlsplit
@@ -54,11 +55,14 @@ class ModelVariant:
 def _is_https_url(value: str) -> bool:
     try:
         parsed = urlsplit(value)
+        port = parsed.port
         return (
-            parsed.scheme.lower() == "https"
+            parsed.scheme == "https"
             and bool(parsed.hostname)
             and parsed.username is None
             and parsed.password is None
+            and bool(parsed.path and parsed.path != "/")
+            and (port is None or 1 <= port <= 65535)
         )
     except ValueError:
         return False
@@ -76,6 +80,16 @@ def _read_json(path: Path, description: str) -> Any:
             return json.load(file)
     except (OSError, json.JSONDecodeError) as error:
         raise CatalogValidationError(f"could not read {description}: {path}") from error
+
+
+def _read_packaged_json(resource_name: str, description: str) -> Any:
+    try:
+        resource = resources.files(__package__).joinpath("data", resource_name)
+        return json.loads(resource.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise CatalogValidationError(
+            f"could not read packaged {description}: {resource_name}"
+        ) from error
 
 
 def _read_json_bytes(path: Path, description: str) -> tuple[bytes, Any]:
@@ -189,8 +203,8 @@ def load_catalog(path: Path) -> tuple[ModelVariant, ...]:
     schema = _read_json(path.with_name("models.schema.json"), "model catalog schema")
     _validate_document(schema, catalog, "model catalog")
 
-    manifest_schema = _read_json(
-        path.with_name("validation-manifest.schema.json"),
+    manifest_schema = _read_packaged_json(
+        "validation-manifest.schema.json",
         "validation manifest schema",
     )
     variants = []

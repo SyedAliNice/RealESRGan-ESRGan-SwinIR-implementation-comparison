@@ -23,6 +23,9 @@ detailframe-worker = "detailframe_worker.__main__:main"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+detailframe_worker = ["data/*.json"]
+
 [[tool.uv.index]]
 name = "pytorch-cpu"
 url = "https://download.pytorch.org/whl/cpu"

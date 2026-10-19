@@ -159,3 +159,65 @@ failure paths before `torch.load`, Windows filename and parsed URL checks, and
 the explicit disabled/unverified eligibility test. Only Task 4 catalog,
 manifest-schema, loader, tests, and report files are in scope; existing plan
 and ledger artifacts were left untouched.
+
+## Reviewer fix round 2
+
+HTTPS URL format validation now parses the authority with `urllib.parse`,
+accesses `.port` so malformed or out-of-range ports are rejected, and requires
+an HTTPS scheme, hostname, no credentials, and a non-root resource path. Tests
+cover malformed and out-of-range ports and missing paths. The validation
+manifest schema is now worker package data and is read via
+`importlib.resources`, so loading an empty catalog no longer depends on a
+second schema file beside the catalog.
+
+**Focused catalog and checkpoint validation**
+
+Command:
+
+```text
+uv run --project worker --python 3.14 --extra dev python -m pytest worker/tests/test_catalog.py worker/tests/test_checkpoint_validation.py -q
+```
+
+Output:
+
+```text
+....................................................                     [100%]
+52 passed in 2.43s
+```
+
+**Full worker suite**
+
+Command:
+
+```text
+uv run --project worker --python 3.14 --extra dev python -m pytest worker/tests -q
+```
+
+Output:
+
+```text
+........................................................................ [ 82%]
+...............                                                          [100%]
+87 passed in 2.70s
+```
+
+**Packaged-resource verification**
+
+Command:
+
+```text
+uv build --project worker --wheel
+```
+
+Output: `Successfully built worker\dist\detailframe_worker-1.0.0-py3-none-any.whl`;
+archive inspection confirmed
+`detailframe_worker/data/validation-manifest.schema.json` is present. The
+focused suite also passed an empty catalog load from a directory without an
+adjacent validation-manifest schema.
+
+**Self-review**
+
+Reviewed malformed-port handling, scheme/host/credential/path requirements,
+resource loading from the package, and package-data configuration. The
+production catalog and reviewed-manifest allowlist remain empty; no models
+were enabled. Plans and ledgers remain untouched.
