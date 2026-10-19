@@ -20,26 +20,9 @@
       "type": "string",
       "pattern": "^[0-9a-f]{64}$"
     },
-    "validation_record": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["status", "tested_at", "torch_version", "checkpoint_sha256"],
-      "properties": {
-        "status": {
-          "const": "passed"
-        },
-        "tested_at": {
-          "type": "string",
-          "format": "date"
-        },
-        "torch_version": {
-          "type": "string",
-          "minLength": 1
-        },
-        "checkpoint_sha256": {
-          "$ref": "#/$defs/sha256"
-        }
-      }
+    "validation_manifest_file": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*\\.json$"
     },
     "model": {
       "type": "object",
@@ -55,8 +38,7 @@
         "license",
         "provenance_url",
         "devices",
-        "enabled",
-        "validation"
+        "enabled"
       ],
       "properties": {
         "id": {
@@ -78,12 +60,15 @@
         "weight_file": {
           "type": "string",
           "minLength": 1,
-          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$",
+          "not": {
+            "pattern": "^(?:[cC][oO][nN]|[pP][rR][nN]|[aA][uU][xX]|[nN][uU][lL]|[cC][oO][mM][1-9]|[lL][pP][tT][1-9])(?:\\..*)?$"
+          }
         },
         "weight_url": {
           "type": "string",
-          "format": "uri",
-          "pattern": "^https://"
+          "format": "https-url",
+          "pattern": "^https://[^/@?#\\s]+(?:[/?#]|$)"
         },
         "sha256": {
           "$ref": "#/$defs/sha256"
@@ -94,8 +79,8 @@
         },
         "provenance_url": {
           "type": "string",
-          "format": "uri",
-          "pattern": "^https://"
+          "format": "https-url",
+          "pattern": "^https://[^/@?#\\s]+(?:[/?#]|$)"
         },
         "size_bytes": {
           "type": "integer",
@@ -111,34 +96,8 @@
         "enabled": {
           "type": "boolean"
         },
-        "validation": {
-          "type": "object",
-          "additionalProperties": {
-            "$ref": "#/$defs/validation_record"
-          },
-          "properties": {
-            "cpu": {
-              "$ref": "#/$defs/validation_record"
-            },
-            "cuda": {
-              "$ref": "#/$defs/validation_record"
-            }
-          }
-        },
-        "expected_state_dict": {
-          "type": "object",
-          "minProperties": 1,
-          "propertyNames": {
-            "minLength": 1
-          },
-          "additionalProperties": {
-            "type": "array",
-            "minItems": 1,
-            "items": {
-              "type": "integer",
-              "minimum": 1
-            }
-          }
+        "validation_manifest": {
+          "$ref": "#/$defs/validation_manifest_file"
         }
       },
       "allOf": [
@@ -152,16 +111,13 @@
             "required": ["enabled"]
           },
           "then": {
-            "required": ["expected_state_dict"],
+            "required": ["validation_manifest"],
             "properties": {
               "devices": {
                 "minItems": 1,
                 "contains": {
                   "const": "cpu"
                 }
-              },
-              "validation": {
-                "required": ["cpu"]
               }
             }
           }
