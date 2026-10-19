@@ -205,7 +205,7 @@ def run_worker(stdin: TextIO, stdout: TextIO, stderr: TextIO, models_dir: Path) 
                             "request_id": message.request_id,
                             "worker_version": __version__,
                             "models": [],
-                            "devices": ["cpu"],
+                            "devices": engine.available_devices(models_dir),
                         }
                     )
                 elif isinstance(message, CancelRequest):

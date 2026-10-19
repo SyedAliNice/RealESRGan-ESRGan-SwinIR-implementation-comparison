@@ -177,7 +177,8 @@ def test_alpha_is_preserved_for_png_and_flattened_for_jpeg(tmp_path, model):
     [
         ({"model_id": "missing"}, "MODEL_UNAVAILABLE"),
         ({"scale": 4}, "UNSUPPORTED_SCALE"),
-        ({"device": "cuda"}, "UNSUPPORTED_DEVICE"),
+        ({"device": "cuda"}, "DEVICE_UNAVAILABLE"),
+        ({"device": "tpu"}, "UNSUPPORTED_DEVICE"),
         ({"output_format": "gif"}, "INVALID_REQUEST"),
         ({"catalog": (make_variant(enabled=False),)}, "MODEL_UNAVAILABLE"),
         ({"catalog": (make_variant(architecture="unknown"),)}, "MODEL_UNAVAILABLE"),

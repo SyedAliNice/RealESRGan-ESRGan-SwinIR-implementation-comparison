@@ -84,6 +84,44 @@ def _load_state_dict(variant: ModelVariant, models_dir: Path) -> dict[str, Any]:
     return state_dict
 
 
+def cuda_usable() -> bool:
+    try:
+        return bool(torch.cuda.is_available())
+    except Exception:
+        return False
+
+
+def variant_devices(variant: ModelVariant) -> tuple[str, ...]:
+    """Devices a variant is validated for and that are usable right now."""
+    usable = []
+    for name in variant.devices:
+        if name == "cpu" or (name == "cuda" and cuda_usable()):
+            usable.append(name)
+    return tuple(usable)
+
+
+def resolve_device(requested: str, variant: ModelVariant) -> str:
+    available = variant_devices(variant)
+    if requested == "auto":
+        return "cuda" if "cuda" in available else "cpu"
+    if requested not in available:
+        raise ProtocolError(
+            "DEVICE_UNAVAILABLE", f"The {requested} device is unavailable for this model"
+        )
+    return requested
+
+
+def available_devices(models_dir: Path) -> list[str]:
+    devices = ["cpu"]
+    try:
+        catalog = load_catalog(models_dir / "models.json")
+    except Exception:
+        return devices
+    if any(item.enabled and "cuda" in variant_devices(item) for item in catalog):
+        devices.append("cuda")
+    return devices
+
+
 def _check_cancelled(cancelled: Callable[[], bool]) -> None:
     if cancelled():
         raise EnhanceCancelled()
@@ -102,6 +140,7 @@ def _run_tiles(
     scale: int,
     progress: Callable[[str, float], None],
     cancelled: Callable[[], bool],
+    device: str = "cpu",
 ) -> torch.Tensor:
     _, channels, height, width = source.shape
     output = torch.empty((1, channels, height * scale, width * scale), dtype=torch.float32)
@@ -120,7 +159,9 @@ def _run_tiles(
             input_bottom = min(height, bottom + TILE_PADDING)
             input_right = min(width, right + TILE_PADDING)
             tile = source[:, :, input_top:input_bottom, input_left:input_right]
-            prediction = model(tile)
+            prediction = model(tile.to(device))
+            if isinstance(prediction, torch.Tensor):
+                prediction = prediction.cpu()
             expected_shape = (
                 1,
                 channels,
@@ -181,8 +222,8 @@ def enhance(
 ) -> ImageInfo:
     if isinstance(scale, bool) or not isinstance(scale, int) or scale <= 0:
         raise ProtocolError("UNSUPPORTED_SCALE", "The requested scale is not supported")
-    if device != "cpu":
-        raise ProtocolError("UNSUPPORTED_DEVICE", "Only CPU inference is supported")
+    if device not in {"auto", "cpu", "cuda"}:
+        raise ProtocolError("UNSUPPORTED_DEVICE", "The requested device is not supported")
     format_name = OUTPUT_FORMATS.get(output_format.lower())
     if format_name is None:
         raise ProtocolError("INVALID_REQUEST", "The requested output format is not supported")
@@ -200,8 +241,9 @@ def enhance(
         raise ProtocolError("MODEL_UNAVAILABLE", "The requested model is unavailable")
     if scale != variant.scale:
         raise ProtocolError("UNSUPPORTED_SCALE", "The requested scale is not supported by this model")
-    if device not in variant.devices or not variant.expected_state_dict:
-        raise ProtocolError("MODEL_UNAVAILABLE", "The requested model is not validated for CPU inference")
+    device = resolve_device(device, variant)
+    if not variant.expected_state_dict:
+        raise ProtocolError("MODEL_UNAVAILABLE", "The requested model is not validated for inference")
     adapter = ADAPTERS.get(variant.architecture)
     if adapter is None:
         raise ProtocolError("MODEL_UNAVAILABLE", "The requested model architecture is unavailable")
@@ -216,6 +258,8 @@ def enhance(
     state_dict = _load_state_dict(variant, models_dir)
     try:
         model = adapter.build(variant, state_dict)
+        if device != "cpu" and hasattr(model, "to"):
+            model = model.to(device)
         if hasattr(model, "eval"):
             model.eval()
     except Exception as error:
@@ -244,7 +288,7 @@ def enhance(
         source = torch.from_numpy(source_array).permute(2, 0, 1).unsqueeze(0).contiguous()
 
         with torch.inference_mode():
-            enhanced = _run_tiles(model, source, scale, progress, cancelled)
+            enhanced = _run_tiles(model, source, scale, progress, cancelled, device)
         enhanced = enhanced[0].clone().clamp_(0.0, 1.0).mul_(255.0).round_().to(torch.uint8)
         pixels = enhanced.permute(1, 2, 0).cpu().numpy()
         result = Image.fromarray(pixels, mode="RGB")
