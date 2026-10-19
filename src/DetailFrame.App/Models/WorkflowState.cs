@@ -17,4 +17,8 @@ public sealed record WorkflowState
         && SelectedScale is > 0
         && !string.IsNullOrWhiteSpace(SelectedDevice)
         && string.IsNullOrEmpty(ActiveJobId);
+
+    public bool CanConfigure => !string.IsNullOrWhiteSpace(InputPath);
+    public bool CanCompare => !string.IsNullOrWhiteSpace(ResultPath);
+    public bool CanSave => !string.IsNullOrWhiteSpace(ResultPath);
 }
