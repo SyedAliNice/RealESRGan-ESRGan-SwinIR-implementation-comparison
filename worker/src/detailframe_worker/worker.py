@@ -17,6 +17,8 @@ from detailframe_worker.protocol import (
     encode_message,
 )
 
+SHUTDOWN_TIMEOUT_SECONDS = 1.0
+
 
 def _error_event(error: ProtocolError) -> dict[str, object]:
     event: dict[str, object] = {
@@ -32,6 +34,14 @@ def _error_event(error: ProtocolError) -> dict[str, object]:
     else:
         event["request_id"] = uuid4()
     return event
+
+
+def _safe_stderr(stderr: TextIO, message: str) -> None:
+    try:
+        print(message, file=stderr)
+        stderr.flush()
+    except Exception:
+        pass
 
 
 def _job_failure(job_id: UUID, code: str, message: str) -> dict[str, object]:
@@ -87,7 +97,7 @@ def _start_job(
         events.put(("job_result", (request.job_id, event)))
 
     thread = threading.Thread(
-        target=execute, name=f"detailframe-job-{request.job_id}"
+        target=execute, name=f"detailframe-job-{request.job_id}", daemon=True
     )
     active_job = _ActiveJob(request.job_id, cancellation_requested, thread)
     thread.start()
@@ -113,15 +123,27 @@ def run_worker(stdin: TextIO, stdout: TextIO, stderr: TextIO, models_dir: Path) 
         finally:
             events.put(("eof", None))
 
-    def abort_active_job() -> None:
+    def request_cancel_and_wait() -> bool:
         nonlocal active
         if active is None:
-            return
-        job_id = active.job_id
-        active.cancellation_requested.set()
-        active.thread.join()
+            return True
+        job = active
+        job.cancellation_requested.set()
+        job.thread.join(timeout=SHUTDOWN_TIMEOUT_SECONDS)
+        if job.thread.is_alive():
+            _safe_stderr(
+                stderr,
+                f"Active job {job.job_id} did not stop within "
+                f"{SHUTDOWN_TIMEOUT_SECONDS:g} seconds; abandoning it",
+            )
+            active = None
+            return False
+        return True
+
+    def abort_active_job() -> None:
+        nonlocal active
+        request_cancel_and_wait()
         active = None
-        emit(_job_failure(job_id, "WORKER_ERROR", "The worker stopped unexpectedly"))
 
     input_thread = threading.Thread(target=read_input, name="detailframe-input", daemon=True)
     input_thread.start()
@@ -194,20 +216,22 @@ def run_worker(stdin: TextIO, stdout: TextIO, stderr: TextIO, models_dir: Path) 
                         return 1 if input_error is not None else 0
             elif kind == "input_error":
                 input_error = payload
-                print(f"Protocol stream failed: {input_error}", file=stderr)
+                _safe_stderr(stderr, f"Protocol stream failed: {input_error}")
                 reached_eof = True
                 if active is not None:
-                    active.cancellation_requested.set()
+                    if not request_cancel_and_wait():
+                        return 1
                 else:
                     return 1
             elif kind == "eof":
                 reached_eof = True
                 if active is not None:
-                    active.cancellation_requested.set()
+                    if not request_cancel_and_wait():
+                        return 1
                 else:
                     return 0
     except (OSError, UnicodeError) as error:
-        print(f"Protocol stream failed: {error}", file=stderr)
+        _safe_stderr(stderr, f"Protocol stream failed: {error}")
         try:
             abort_active_job()
         except Exception:

@@ -87,7 +87,7 @@ def decode_message(line: str) -> ProtocolMessage:
         data.get("protocol_version"), bool
     ):
         error = ProtocolError("UNSUPPORTED_VERSION", "Unsupported protocol version")
-        if data.get("type") == "enhance":
+        if data.get("type") in ("enhance", "cancel"):
             try:
                 error.job_id = _identifier(data.get("job_id"), "job_id")
             except ProtocolError:

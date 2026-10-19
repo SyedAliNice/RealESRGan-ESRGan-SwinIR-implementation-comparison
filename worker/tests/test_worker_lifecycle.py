@@ -2,6 +2,7 @@ import io
 import json
 import queue
 import threading
+import time
 
 from detailframe_worker import worker
 from detailframe_worker.worker import run_worker
@@ -331,3 +332,68 @@ def test_unreadable_protocol_stream_returns_nonzero_and_stderr_only(tmp_path):
     assert result != 0
     assert stdout.getvalue() == ""
     assert "stream disconnected" in stderr.getvalue()
+
+
+def test_non_cooperative_job_does_not_block_shutdown_or_write_protocol_output(
+    monkeypatch, tmp_path
+):
+    started = threading.Event()
+    release_job = threading.Event()
+    job_threads = []
+    cancellation_events = []
+
+    def ignore_cancellation(request, models_dir, cancellation_requested):
+        del models_dir
+        job_threads.append(threading.current_thread())
+        cancellation_events.append(cancellation_requested)
+        started.set()
+        assert release_job.wait(timeout=2)
+        return {
+            "protocol_version": 1,
+            "type": "complete",
+            "job_id": request.job_id,
+            "output_path": "C:\\images\\output.png",
+            "width": 1,
+            "height": 1,
+        }
+
+    monkeypatch.setattr(worker, "_execute_enhance", ignore_cancellation)
+    monkeypatch.setattr(worker, "SHUTDOWN_TIMEOUT_SECONDS", 0.1, raising=False)
+    stdin = io.StringIO(
+        json.dumps(
+            {
+                "protocol_version": 1,
+                "type": "enhance",
+                "job_id": JOB_ID,
+                "model_id": "model-id",
+                "scale": 4,
+                "device": "cpu",
+                "input_path": "C:\\images\\input.png",
+                "output_path": "C:\\images\\output.png",
+                "output_format": "png",
+            }
+        )
+        + "\n"
+    )
+    stdout = io.StringIO()
+    stderr = io.StringIO()
+    started_at = time.monotonic()
+
+    result = run_worker(stdin, stdout, stderr, tmp_path)
+    elapsed = time.monotonic() - started_at
+    output_after_shutdown = stdout.getvalue()
+
+    assert started.is_set()
+    assert result != 0
+    assert elapsed < 1
+    assert "did not stop" in stderr.getvalue()
+    assert len(job_threads) == 1
+    assert job_threads[0].daemon
+    assert cancellation_events[0].is_set()
+    assert output_after_shutdown == ""
+
+    release_job.set()
+    job_threads[0].join(timeout=1)
+
+    assert not job_threads[0].is_alive()
+    assert stdout.getvalue() == output_after_shutdown

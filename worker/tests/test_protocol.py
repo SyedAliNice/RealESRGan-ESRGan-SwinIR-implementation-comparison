@@ -75,6 +75,22 @@ def test_unsupported_version_preserves_valid_enhance_job_id():
     assert error.value.job_id == UUID(JOB_ID)
 
 
+def test_unsupported_version_preserves_valid_cancel_job_id():
+    with pytest.raises(ProtocolError) as error:
+        decode_message(
+            json.dumps(
+                {
+                    "protocol_version": 2,
+                    "type": "cancel",
+                    "job_id": JOB_ID,
+                }
+            )
+        )
+
+    assert error.value.code == "UNSUPPORTED_VERSION"
+    assert error.value.job_id == UUID(JOB_ID)
+
+
 def test_ignores_harmless_extension_fields():
     assert decode_message(
         json.dumps(
