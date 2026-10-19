@@ -9,6 +9,7 @@ public sealed partial class MainWindow : Window
 {
     private readonly ThemeService _theme;
     private readonly ChooseImagePage _chooseImage;
+    private readonly ConfigurePage _configure;
     private WorkflowState _state = WorkflowState.Empty;
 
     public MainWindow()
@@ -26,6 +27,17 @@ public sealed partial class MainWindow : Window
                 ActiveJobId = null,
             });
         ChooseImageHost.Content = _chooseImage;
+        _configure = new ConfigurePage(
+            new ModelCatalogService(ModelCatalogService.DefaultCatalogPath),
+            new ModelDownloadService(new HttpClient()));
+        _configure.SelectionChanged += (_, s) =>
+            UpdateState(_state with
+            {
+                SelectedModelId = s.ModelId,
+                SelectedScale = s.Scale,
+                SelectedDevice = s.Device,
+            });
+        ConfigureHost.Content = _configure;
         Sidebar.State = _state;
         ShowStage(WorkflowStage.ChooseImage);
     }
@@ -38,13 +50,19 @@ public sealed partial class MainWindow : Window
         Sidebar.State = state;
     }
 
-    private void ShowStage(WorkflowStage stage)
+    private async void ShowStage(WorkflowStage stage)
     {
         var isChoose = stage == WorkflowStage.ChooseImage;
+        var isConfigure = stage == WorkflowStage.Configure;
         ChooseImageHost.Visibility = isChoose ? Visibility.Visible : Visibility.Collapsed;
-        PlaceholderPanel.Visibility = isChoose ? Visibility.Collapsed : Visibility.Visible;
+        ConfigureHost.Visibility = isConfigure ? Visibility.Visible : Visibility.Collapsed;
+        PlaceholderPanel.Visibility = isChoose || isConfigure ? Visibility.Collapsed : Visibility.Visible;
         StageTitle.Text = WorkflowStages.Title(stage);
         StageHint.Text = "This step is not implemented yet.";
         Sidebar.CurrentStage = stage;
+        if (isConfigure)
+        {
+            await _configure.LoadAsync();
+        }
     }
 }

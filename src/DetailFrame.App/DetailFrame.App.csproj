@@ -19,5 +19,9 @@
     <PackageReference Include="Microsoft.WindowsAppSDK" Version="2.5.1" />
     <PackageReference Include="Microsoft.Windows.SDK.BuildTools" Version="10.0.28000.2705" />
   </ItemGroup>
+  <ItemGroup>
+    <Content Include="..\..\shared\models.json" Link="shared\models.json" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\..\shared\models.schema.json" Link="shared\models.schema.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
 
 </Project>
