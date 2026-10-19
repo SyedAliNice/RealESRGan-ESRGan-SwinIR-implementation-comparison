@@ -3,10 +3,12 @@ import threading
 import traceback
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Callable
 from typing import TextIO
 from uuid import UUID, uuid4
 
 from detailframe_worker import __version__
+from detailframe_worker import engine
 from detailframe_worker.protocol import (
     PROTOCOL_VERSION,
     CancelRequest,
@@ -55,18 +57,45 @@ def _job_failure(job_id: UUID, code: str, message: str) -> dict[str, object]:
 
 
 def _execute_enhance(
-    request: EnhanceRequest, models_dir: Path, cancellation_requested: threading.Event
+    request: EnhanceRequest,
+    models_dir: Path,
+    cancellation_requested: threading.Event,
+    progress: Callable[[str, float], None],
 ) -> dict[str, object]:
-    del models_dir
     if cancellation_requested.is_set():
         return {
             "protocol_version": PROTOCOL_VERSION,
             "type": "cancelled",
             "job_id": request.job_id,
         }
-    return _job_failure(
-        request.job_id, "MODEL_UNAVAILABLE", "The requested model is unavailable"
-    )
+    try:
+        info = engine.enhance(
+            model_id=request.model_id,
+            scale=request.scale,
+            device=request.device,
+            input_path=Path(request.input_path),
+            output_path=Path(request.output_path),
+            output_format=request.output_format,
+            progress=progress,
+            cancelled=cancellation_requested.is_set,
+            models_dir=models_dir,
+        )
+    except engine.EnhanceCancelled:
+        return {
+            "protocol_version": PROTOCOL_VERSION,
+            "type": "cancelled",
+            "job_id": request.job_id,
+        }
+    except ProtocolError as error:
+        return _job_failure(request.job_id, error.code, error.message)
+    return {
+        "protocol_version": PROTOCOL_VERSION,
+        "type": "complete",
+        "job_id": request.job_id,
+        "output_path": request.output_path,
+        "width": info.width,
+        "height": info.height,
+    }
 
 
 @dataclass
@@ -86,7 +115,14 @@ def _start_job(
 
     def execute() -> None:
         try:
-            event = _execute_enhance(request, models_dir, cancellation_requested)
+            event = _execute_enhance(
+                request,
+                models_dir,
+                cancellation_requested,
+                lambda stage, fraction: events.put(
+                    ("job_progress", (request.job_id, stage, fraction))
+                ),
+            )
         except Exception:
             traceback.print_exc(file=stderr)
             event = _job_failure(
@@ -214,6 +250,18 @@ def run_worker(stdin: TextIO, stdout: TextIO, stderr: TextIO, models_dir: Path) 
                     active = None
                     if reached_eof:
                         return 1 if input_error is not None else 0
+            elif kind == "job_progress":
+                job_id, stage, fraction = payload
+                if active is not None and active.job_id == job_id:
+                    emit(
+                        {
+                            "protocol_version": PROTOCOL_VERSION,
+                            "type": "progress",
+                            "job_id": job_id,
+                            "stage": stage,
+                            "progress": fraction,
+                        }
+                    )
             elif kind == "input_error":
                 input_error = payload
                 _safe_stderr(stderr, f"Protocol stream failed: {input_error}")

@@ -153,8 +153,8 @@ def test_cancel_reaches_active_job_and_emits_one_cancelled_terminal(
 ):
     started = threading.Event()
 
-    def wait_for_cancellation(request, models_dir, cancellation_requested):
-        del models_dir
+    def wait_for_cancellation(request, models_dir, cancellation_requested, progress):
+        del models_dir, progress
         assert str(request.job_id) == JOB_ID
         started.set()
         assert cancellation_requested.wait(timeout=2)
@@ -202,8 +202,8 @@ def test_job_completion_is_emitted_before_input_closes(monkeypatch, tmp_path):
     started = threading.Event()
     finish_job = threading.Event()
 
-    def wait_for_completion(request, models_dir, cancellation_requested):
-        del models_dir, cancellation_requested
+    def wait_for_completion(request, models_dir, cancellation_requested, progress):
+        del models_dir, cancellation_requested, progress
         started.set()
         assert finish_job.wait(timeout=2)
         return {
@@ -282,8 +282,8 @@ def test_job_completion_is_emitted_before_input_closes(monkeypatch, tmp_path):
 def test_unexpected_job_exception_emits_failure_and_stderr_diagnostic(
     monkeypatch, tmp_path
 ):
-    def fail_unexpectedly(request, models_dir, cancellation_requested):
-        del request, models_dir, cancellation_requested
+    def fail_unexpectedly(request, models_dir, cancellation_requested, progress):
+        del request, models_dir, cancellation_requested, progress
         raise RuntimeError("internal inference detail")
 
     monkeypatch.setattr(worker, "_execute_enhance", fail_unexpectedly)
@@ -342,8 +342,8 @@ def test_non_cooperative_job_does_not_block_shutdown_or_write_protocol_output(
     job_threads = []
     cancellation_events = []
 
-    def ignore_cancellation(request, models_dir, cancellation_requested):
-        del models_dir
+    def ignore_cancellation(request, models_dir, cancellation_requested, progress):
+        del models_dir, progress
         job_threads.append(threading.current_thread())
         cancellation_events.append(cancellation_requested)
         started.set()

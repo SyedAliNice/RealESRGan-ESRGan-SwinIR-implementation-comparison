@@ -70,3 +70,47 @@ def test_rejects_oversized_dimensions_before_decoding_pixels(monkeypatch, tmp_pa
         validate_image(path, max_pixels=100)
 
     assert error.value.code == "IMAGE_TOO_LARGE"
+
+
+def _bilevel_png(path, size):
+    Image.new("1", size).save(path, format="PNG")
+
+
+def test_image_just_under_cap_is_not_rejected_by_pillow_default_threshold(tmp_path):
+    default_threshold = Image.MAX_IMAGE_PIXELS
+    cap = 100_000_000
+    size = (10_000, 9_000)
+    assert default_threshold < size[0] * size[1] < cap
+    path = tmp_path / "large.png"
+    _bilevel_png(path, size)
+
+    info = validate_image(path, max_pixels=cap)
+
+    assert (info.width, info.height) == size
+    assert Image.MAX_IMAGE_PIXELS == default_threshold
+
+
+@pytest.mark.parametrize(
+    "size", [(10_000, 10_000), (10_000, 10_001), (20_000, 10_001)]
+)
+def test_image_at_or_above_cap_is_rejected_and_threshold_restored(tmp_path, size):
+    default_threshold = Image.MAX_IMAGE_PIXELS
+    path = tmp_path / "huge.png"
+    _bilevel_png(path, size)
+
+    with pytest.raises(ProtocolError) as error:
+        validate_image(path, max_pixels=100_000_000)
+
+    assert error.value.code == "IMAGE_TOO_LARGE"
+    assert Image.MAX_IMAGE_PIXELS == default_threshold
+
+
+def test_pillow_threshold_is_restored_after_invalid_image(tmp_path):
+    default_threshold = Image.MAX_IMAGE_PIXELS
+    path = tmp_path / "broken.png"
+    path.write_bytes(b"not an image")
+
+    with pytest.raises(ProtocolError):
+        validate_image(path, max_pixels=100_000_000)
+
+    assert Image.MAX_IMAGE_PIXELS == default_threshold
