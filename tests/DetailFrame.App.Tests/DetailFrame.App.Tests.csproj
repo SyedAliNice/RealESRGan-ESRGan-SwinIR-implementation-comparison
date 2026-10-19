@@ -16,6 +16,7 @@
 
   <ItemGroup>
     <!-- Plain C# state is compiled directly so tests need not load the WinUI project. -->
+    <Compile Include="..\..\src\DetailFrame.App\Controls\ComparisonViewState.cs" Link="Controls\ComparisonViewState.cs" />
     <Compile Include="..\..\src\DetailFrame.App\Models\WorkflowState.cs" Link="Models\WorkflowState.cs" />
     <Compile Include="..\..\src\DetailFrame.App\Models\WorkflowStage.cs" Link="Models\WorkflowStage.cs" />
     <Compile Include="..\..\src\DetailFrame.App\Services\ImageInputService.cs" Link="Services\ImageInputService.cs" />

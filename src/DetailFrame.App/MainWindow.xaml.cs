@@ -11,6 +11,7 @@ public sealed partial class MainWindow : Window
     private readonly ChooseImagePage _chooseImage;
     private readonly ConfigurePage _configure;
     private readonly EnhancePage _enhance;
+    private readonly ComparisonPage _compare;
     private readonly EnhancementCoordinator _coordinator;
     private WorkflowState _state = WorkflowState.Empty;
     private bool _closing;
@@ -84,6 +85,8 @@ public sealed partial class MainWindow : Window
         _enhance.JobFinished += (_, result) =>
             UpdateState(_state with { ActiveJobId = null, ResultPath = result?.Path ?? _state.ResultPath });
         EnhanceHost.Content = _enhance;
+        _compare = new ComparisonPage();
+        CompareHost.Content = _compare;
         Sidebar.State = _state;
         ShowStage(WorkflowStage.ChooseImage);
     }
@@ -95,6 +98,7 @@ public sealed partial class MainWindow : Window
         _state = state;
         Sidebar.State = state;
         _enhance?.SetState(state);
+        _compare?.SetState(state);
     }
 
     private async void ShowStage(WorkflowStage stage)
@@ -105,7 +109,9 @@ public sealed partial class MainWindow : Window
         ChooseImageHost.Visibility = isChoose ? Visibility.Visible : Visibility.Collapsed;
         ConfigureHost.Visibility = isConfigure ? Visibility.Visible : Visibility.Collapsed;
         EnhanceHost.Visibility = isEnhance ? Visibility.Visible : Visibility.Collapsed;
-        PlaceholderPanel.Visibility = isChoose || isConfigure || isEnhance ? Visibility.Collapsed : Visibility.Visible;
+        var isCompare = stage == WorkflowStage.Compare;
+        CompareHost.Visibility = isCompare ? Visibility.Visible : Visibility.Collapsed;
+        PlaceholderPanel.Visibility = isChoose || isConfigure || isEnhance || isCompare ? Visibility.Collapsed : Visibility.Visible;
         StageTitle.Text = WorkflowStages.Title(stage);
         StageHint.Text = "This step is not implemented yet.";
         Sidebar.CurrentStage = stage;

@@ -1,0 +1,12 @@
+<UserControl
+    x:Class="DetailFrame.App.Views.ComparisonPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:controls="using:DetailFrame.App.Controls">
+    <Grid Padding="32" RowDefinitions="Auto,*" RowSpacing="16">
+        <TextBlock Style="{StaticResource TitleTextBlockStyle}"
+                   Text="Compare"
+                   AutomationProperties.HeadingLevel="Level1" />
+        <controls:BeforeAfterViewer x:Name="Viewer" Grid.Row="1" />
+    </Grid>
+</UserControl>

@@ -40,6 +40,10 @@
                             Visibility="Collapsed"
                             HorizontalContentAlignment="Stretch"
                             VerticalContentAlignment="Stretch" />
+            <ContentControl x:Name="CompareHost"
+                            Visibility="Collapsed"
+                            HorizontalContentAlignment="Stretch"
+                            VerticalContentAlignment="Stretch" />
         </Grid>
     </Grid>
 </Window>
