@@ -13,11 +13,9 @@ if (-not $SkipWorker) {
 }
 
 if (-not $SkipApp) {
-    if (Test-Path $appOut) { Remove-Item -Recurse -Force $appOut }
-    dotnet publish (Join-Path $repoRoot "src\DetailFrame.App\DetailFrame.App.csproj") `
-        -c Release -r win-x64 -p:Platform=x64 --self-contained true `
-        -p:Deterministic=true -p:ContinuousIntegrationBuild=true -o $appOut
-    if ($LASTEXITCODE -ne 0) { throw "dotnet publish failed" }
+    & (Join-Path $PSScriptRoot "build-app.ps1") -RepoRoot $repoRoot
 }
 
 & (Join-Path $PSScriptRoot "verify-artifacts.ps1") -RepoRoot $repoRoot
+& (Join-Path $PSScriptRoot "verify-no-machine-paths.ps1") -Root (Join-Path $repoRoot "artifacts")
+if ($LASTEXITCODE -ne 0) { throw "machine path scan failed" }

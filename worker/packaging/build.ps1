@@ -1,7 +1,18 @@
+[CmdletBinding()]
+param(
+    [switch]$ValidateOnly
+)
 $ErrorActionPreference = "Stop"
 
 $workerRoot = Split-Path -Parent $PSScriptRoot
 $repoRoot = Split-Path -Parent $workerRoot
+
+# Fail early if any repository-managed input is missing; model weights are never bundled or downloaded here.
+foreach ($r in @((Join-Path $workerRoot "pyproject.toml"), (Join-Path $workerRoot "uv.lock"), (Join-Path $PSScriptRoot "detailframe-worker.spec"))) {
+    if (-not (Test-Path -LiteralPath $r -PathType Leaf)) { throw "Missing required worker build input: $r" }
+}
+if ($ValidateOnly) { "Inputs OK"; return }
+
 $python = Join-Path $workerRoot ".venv\Scripts\python.exe"
 $output = Join-Path $repoRoot "artifacts\worker"
 $buildDir = Join-Path $repoRoot "artifacts\build\worker"
