@@ -1,4 +1,7 @@
-import sys
+import queue
+import threading
+import traceback
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TextIO
 from uuid import UUID, uuid4
@@ -10,7 +13,6 @@ from detailframe_worker.protocol import (
     CapabilitiesRequest,
     EnhanceRequest,
     ProtocolError,
-    ProtocolMessage,
     decode_message,
     encode_message,
 )
@@ -42,75 +44,179 @@ def _job_failure(job_id: UUID, code: str, message: str) -> dict[str, object]:
     }
 
 
-def _handle_message(
-    message: ProtocolMessage, active_job: UUID | None
-) -> tuple[dict[str, object] | None, UUID | None]:
-    if isinstance(message, CapabilitiesRequest):
-        return (
-            {
-                "protocol_version": PROTOCOL_VERSION,
-                "type": "capabilities_result",
-                "request_id": message.request_id,
-                "worker_version": __version__,
-                "models": [],
-                "devices": ["cpu"],
-            },
-            active_job,
-        )
-    if isinstance(message, CancelRequest):
-        if active_job == message.job_id:
-            return (
-                {
-                    "protocol_version": PROTOCOL_VERSION,
-                    "type": "cancelled",
-                    "job_id": message.job_id,
-                },
-                None,
-            )
-        return (
-            _error_event(
-                ProtocolError(
-                    "JOB_NOT_ACTIVE", "The requested job is not active", job_id=message.job_id
-                )
-            ),
-            active_job,
-        )
-    if active_job is not None:
-        return (
-            _error_event(
-                ProtocolError(
-                    "JOB_ALREADY_ACTIVE",
-                    "Another inference job is already active",
-                    job_id=message.job_id,
-                )
-            ),
-            active_job,
-        )
-
-    # Inference execution is provided by a later worker task; Task 2 establishes
-    # the protocol and reports unavailable models as a terminal job failure.
-    return (
-        _job_failure(message.job_id, "MODEL_UNAVAILABLE", "The requested model is unavailable"),
-        None,
+def _execute_enhance(
+    request: EnhanceRequest, models_dir: Path, cancellation_requested: threading.Event
+) -> dict[str, object]:
+    del models_dir
+    if cancellation_requested.is_set():
+        return {
+            "protocol_version": PROTOCOL_VERSION,
+            "type": "cancelled",
+            "job_id": request.job_id,
+        }
+    return _job_failure(
+        request.job_id, "MODEL_UNAVAILABLE", "The requested model is unavailable"
     )
 
 
+@dataclass
+class _ActiveJob:
+    job_id: UUID
+    cancellation_requested: threading.Event
+    thread: threading.Thread
+
+
+def _start_job(
+    request: EnhanceRequest,
+    models_dir: Path,
+    stderr: TextIO,
+    events: queue.Queue[tuple[str, object]],
+) -> _ActiveJob:
+    cancellation_requested = threading.Event()
+
+    def execute() -> None:
+        try:
+            event = _execute_enhance(request, models_dir, cancellation_requested)
+        except Exception:
+            traceback.print_exc(file=stderr)
+            event = _job_failure(
+                request.job_id,
+                "WORKER_ERROR",
+                "The worker encountered an unexpected error",
+            )
+        events.put(("job_result", (request.job_id, event)))
+
+    thread = threading.Thread(
+        target=execute, name=f"detailframe-job-{request.job_id}"
+    )
+    active_job = _ActiveJob(request.job_id, cancellation_requested, thread)
+    thread.start()
+    return active_job
+
+
 def run_worker(stdin: TextIO, stdout: TextIO, stderr: TextIO, models_dir: Path) -> int:
-    del models_dir
-    active_job: UUID | None = None
+    active: _ActiveJob | None = None
+    events: queue.Queue[tuple[str, object]] = queue.Queue()
+    input_error: Exception | None = None
+    reached_eof = False
+
+    def emit(event: dict[str, object]) -> None:
+        stdout.write(encode_message(event))
+        stdout.flush()
+
+    def read_input() -> None:
+        try:
+            for line in stdin:
+                events.put(("line", line))
+        except Exception as error:
+            events.put(("input_error", error))
+        finally:
+            events.put(("eof", None))
+
+    def abort_active_job() -> None:
+        nonlocal active
+        if active is None:
+            return
+        job_id = active.job_id
+        active.cancellation_requested.set()
+        active.thread.join()
+        active = None
+        emit(_job_failure(job_id, "WORKER_ERROR", "The worker stopped unexpectedly"))
+
+    input_thread = threading.Thread(target=read_input, name="detailframe-input", daemon=True)
+    input_thread.start()
+
     try:
-        for line in stdin:
-            if not line.strip():
-                continue
-            try:
-                message = decode_message(line)
-                event, active_job = _handle_message(message, active_job)
-            except ProtocolError as error:
-                event = _error_event(error)
-            if event is not None:
-                stdout.write(encode_message(event))
-                stdout.flush()
+        while True:
+            kind, payload = events.get()
+            if kind == "line":
+                line = payload
+                if not isinstance(line, str) or not line.strip():
+                    continue
+                try:
+                    message = decode_message(line)
+                except ProtocolError as error:
+                    emit(_error_event(error))
+                    continue
+
+                if isinstance(message, CapabilitiesRequest):
+                    emit(
+                        {
+                            "protocol_version": PROTOCOL_VERSION,
+                            "type": "capabilities_result",
+                            "request_id": message.request_id,
+                            "worker_version": __version__,
+                            "models": [],
+                            "devices": ["cpu"],
+                        }
+                    )
+                elif isinstance(message, CancelRequest):
+                    if active is not None and active.job_id == message.job_id:
+                        active.cancellation_requested.set()
+                    else:
+                        emit(
+                            _error_event(
+                                ProtocolError(
+                                    "JOB_NOT_ACTIVE",
+                                    "The requested job is not active",
+                                    job_id=message.job_id,
+                                )
+                            )
+                        )
+                elif active is not None:
+                    emit(
+                        _error_event(
+                            ProtocolError(
+                                "JOB_ALREADY_ACTIVE",
+                                "Another inference job is already active",
+                                job_id=message.job_id,
+                            )
+                        )
+                    )
+                else:
+                    active = _start_job(message, models_dir, stderr, events)
+            elif kind == "job_result":
+                job_id, event = payload
+                if active is not None and active.job_id == job_id:
+                    active.thread.join()
+                    if input_error is not None:
+                        emit(
+                            _job_failure(
+                                active.job_id,
+                                "WORKER_ERROR",
+                                "The worker stopped unexpectedly",
+                            )
+                        )
+                    else:
+                        emit(event)
+                    active = None
+                    if reached_eof:
+                        return 1 if input_error is not None else 0
+            elif kind == "input_error":
+                input_error = payload
+                print(f"Protocol stream failed: {input_error}", file=stderr)
+                reached_eof = True
+                if active is not None:
+                    active.cancellation_requested.set()
+                else:
+                    return 1
+            elif kind == "eof":
+                reached_eof = True
+                if active is not None:
+                    active.cancellation_requested.set()
+                else:
+                    return 0
     except (OSError, UnicodeError) as error:
         print(f"Protocol stream failed: {error}", file=stderr)
+        try:
+            abort_active_job()
+        except Exception:
+            traceback.print_exc(file=stderr)
         return 1
-    return 0
+    except Exception:
+        traceback.print_exc(file=stderr)
+        try:
+            abort_active_job()
+        except Exception:
+            traceback.print_exc(file=stderr)
+        return 1

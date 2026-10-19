@@ -86,34 +86,29 @@ def decode_message(line: str) -> ProtocolMessage:
     if data.get("protocol_version") != PROTOCOL_VERSION or isinstance(
         data.get("protocol_version"), bool
     ):
-        raise ProtocolError("UNSUPPORTED_VERSION", "Unsupported protocol version")
+        error = ProtocolError("UNSUPPORTED_VERSION", "Unsupported protocol version")
+        if data.get("type") == "enhance":
+            try:
+                error.job_id = _identifier(data.get("job_id"), "job_id")
+            except ProtocolError:
+                pass
+        elif data.get("type") == "capabilities":
+            try:
+                error.request_id = _identifier(data.get("request_id"), "request_id")
+            except ProtocolError:
+                pass
+        raise error
 
+    # Extension fields are ignored; behavior-changing additions require a version bump.
     message_type = data.get("type")
     if message_type == "capabilities":
         identifier = _identifier(data.get("request_id"), "request_id")
-        _check_fields(data, {"protocol_version", "type", "request_id"}, request_id=identifier)
         return CapabilitiesRequest(identifier)
     if message_type == "cancel":
         identifier = _identifier(data.get("job_id"), "job_id")
-        _check_fields(data, {"protocol_version", "type", "job_id"}, job_id=identifier)
         return CancelRequest(identifier)
     if message_type == "enhance":
         job_id = _identifier(data.get("job_id"), "job_id")
-        _check_fields(
-            data,
-            {
-                "protocol_version",
-                "type",
-                "job_id",
-                "model_id",
-                "scale",
-                "device",
-                "input_path",
-                "output_path",
-                "output_format",
-            },
-            job_id=job_id,
-        )
         scale = data.get("scale")
         if isinstance(scale, bool) or not isinstance(scale, int) or scale <= 0:
             raise ProtocolError(
@@ -133,22 +128,6 @@ def decode_message(line: str) -> ProtocolMessage:
             error.job_id = job_id
             raise
     raise ProtocolError("UNKNOWN_TYPE", "Unknown message type")
-
-
-def _check_fields(
-    data: dict[str, Any],
-    allowed: set[str],
-    *,
-    request_id: UUID | None = None,
-    job_id: UUID | None = None,
-) -> None:
-    if data.keys() - allowed:
-        raise ProtocolError(
-            "INVALID_REQUEST",
-            "Message contains unsupported fields",
-            request_id=request_id,
-            job_id=job_id,
-        )
 
 
 def encode_message(message: dict[str, Any]) -> str:
