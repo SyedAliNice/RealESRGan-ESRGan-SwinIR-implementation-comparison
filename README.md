@@ -2,7 +2,9 @@
 # 📌 Image Super-Resolution: Real-ESRGAN, ESRGAN & SwinIR
 ![image alt](https://github.com/SyedAliNice/RealESRGan-ESRGan-SwinIR-implementation-comparison/blob/0255d105b24d7a4e3d6ed5fd119655cf8e595600/a-comparison-of-images-generated-by-the-_Iiuzz-diTEe8LzvjjVIclQ_7b6e6lydTmCkg1N7KolvNQ-fotor-2025032983258.jpg)
 #       🚀 Overview
-This project implements and compares three popular deep-learning-based image super-resolution models:
+> **Scope note:** this top-level section describes the legacy Jupyter notebooks only. The DetailFrame WinUI app (see the DetailFrame section below) ships an empty model catalog and does not yet support any of these models or include verified weights.
+
+The legacy notebooks implement and compare three popular deep-learning-based image super-resolution models:
 
 -    Real-ESRGAN 🏆
 
@@ -66,7 +68,7 @@ Ensure you have the following dependencies installed:
    #    🔥 Usage
    🖼️ Enhancing an Image
 
-Run the appropriate notebook and execute the inference code:
+Legacy notebooks only (not the DetailFrame app). Run the appropriate notebook and execute the inference code; the command below assumes an `enhance.py` script that is not part of this repository:
 
         python enhance.py --input image.jpg --model real-esrgan
 Change real-esrgan to esrgan or swinir as needed.
@@ -74,7 +76,7 @@ Change real-esrgan to esrgan or swinir as needed.
 
 # 🪟 DetailFrame for Windows (WinUI 3 shell)
 
-Build and test (Windows 10 1809+ / Windows 11, .NET 10 SDK):
+Build and test (Windows 11 target; builds require Windows 10 version 2004 / build 19041 or later, .NET 10 SDK):
 
     dotnet test DetailFrame.sln
     dotnet build src/DetailFrame.App/DetailFrame.App.csproj -c Release -p:Platform=x64

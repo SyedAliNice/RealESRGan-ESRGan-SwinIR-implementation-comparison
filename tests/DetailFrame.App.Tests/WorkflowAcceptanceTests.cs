@@ -52,8 +52,11 @@ public sealed class WorkflowAcceptanceTests : IDisposable
         await File.WriteAllBytesAsync(path, bytes);
     }
 
-    private static Task<EnhancementResult> ScaledOutput(EnhancementRequest r, uint w, uint h) =>
-        WritePngAsync(r.OutputPath, w, h).ContinueWith(_ => new EnhancementResult(r.OutputPath, (int)w, (int)h));
+    private static async Task<EnhancementResult> ScaledOutput(EnhancementRequest r, uint w, uint h)
+    {
+        await WritePngAsync(r.OutputPath, w, h);
+        return new EnhancementResult(r.OutputPath, (int)w, (int)h);
+    }
 
     private EnhancementCoordinator Coordinator(FakeWorker worker) =>
         new(worker, EnhancementCoordinator.DecodeWithWindowsAsync, Path.Combine(_dir, "work"));
