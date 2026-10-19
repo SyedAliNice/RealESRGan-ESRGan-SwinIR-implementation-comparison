@@ -13,6 +13,11 @@ public sealed partial class MainWindow : Window
     private readonly EnhancePage _enhance;
     private readonly EnhancementCoordinator _coordinator;
     private WorkflowState _state = WorkflowState.Empty;
+    private bool _closing;
+    private bool _closeAllowed;
+
+    // Covers the client's cancel grace plus its exit grace before the kill fallback.
+    private static readonly TimeSpan ShutdownTimeout = TimeSpan.FromSeconds(15);
 
     public MainWindow()
     {
@@ -50,6 +55,30 @@ public sealed partial class MainWindow : Window
             EnhancementCoordinator.DefaultWorkRoot);
         _coordinator.CleanupStaleWork();
         Closed += (_, _) => _coordinator.Dispose();
+        AppWindow.Closing += async (_, e) =>
+        {
+            if (_closeAllowed)
+            {
+                return;
+            }
+
+            e.Cancel = true;
+            if (_closing)
+            {
+                return;
+            }
+
+            _closing = true;
+            try
+            {
+                await _coordinator.ShutdownAsync(ShutdownTimeout);
+            }
+            finally
+            {
+                _closeAllowed = true;
+                Close();
+            }
+        };
         _enhance = new EnhancePage(_coordinator);
         _enhance.JobStarted += (_, _) => UpdateState(_state with { ActiveJobId = _coordinator.ActiveJobId?.ToString() ?? "pending" });
         _enhance.JobFinished += (_, result) =>

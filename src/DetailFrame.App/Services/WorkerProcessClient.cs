@@ -403,8 +403,7 @@ public sealed class WorkerProcessClient : IWorkerClient
     private static EnhancementResult ParseComplete(JsonElement e, EnhancementRequest request, string diagnostics)
     {
         var path = GetString(e, "output_path");
-        if (string.IsNullOrEmpty(path)
-            || !string.Equals(Path.GetFullPath(path), Path.GetFullPath(request.OutputPath), StringComparison.OrdinalIgnoreCase)
+        if (string.IsNullOrEmpty(path) || !SamePath(path, request.OutputPath)
             || !TryGetPositiveInt(e, "width", out var width)
             || !TryGetPositiveInt(e, "height", out var height))
         {
@@ -412,6 +411,18 @@ public sealed class WorkerProcessClient : IWorkerClient
         }
 
         return new EnhancementResult(request.OutputPath, width, height);
+    }
+
+    private static bool SamePath(string reported, string expected)
+    {
+        try
+        {
+            return string.Equals(Path.GetFullPath(reported), Path.GetFullPath(expected), StringComparison.OrdinalIgnoreCase);
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            return false;
+        }
     }
 
     private static WorkerCapabilities ParseCapabilities(JsonElement e, string diagnostics)

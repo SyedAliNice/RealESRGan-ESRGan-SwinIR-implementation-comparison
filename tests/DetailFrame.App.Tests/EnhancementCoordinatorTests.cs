@@ -50,6 +50,45 @@ public sealed class EnhancementCoordinatorTests : IDisposable
         new(client, v ?? Decodes(8, 6), _root);
 
     [Fact]
+    public async Task Shutdown_waits_for_worker_kill_of_unresponsive_job()
+    {
+        var launcher = new FakeLauncher((p, t) => Task.Delay(Timeout.Infinite, t));
+        var client = new WorkerProcessClient(launcher, new WorkerClientOptions
+        {
+            CancelGrace = TimeSpan.FromMilliseconds(200),
+            ExitGrace = TimeSpan.FromMilliseconds(100),
+        });
+        using var c = new EnhancementCoordinator(client, Decodes(8, 6), _root);
+        var job = Task.Run(() => c.EnhanceAsync(Job, new NullProgress(), CancellationToken.None));
+        while (c.ActiveJobId is null || launcher.Started.Count == 0)
+        {
+            await Task.Delay(10);
+        }
+
+        await c.ShutdownAsync(TimeSpan.FromSeconds(10));
+
+        Assert.True(launcher.Started[0].WasKilled);
+        Assert.Null(c.ActiveJobId);
+        Assert.Equal(EnhancementStatus.Cancelled, (await job).Status);
+    }
+
+    [Fact]
+    public async Task Shutdown_without_active_job_returns_immediately()
+    {
+        using var c = Create(new FakeClient((r, _, _) => WriteOutput(r)));
+
+        await c.ShutdownAsync(TimeSpan.FromSeconds(10));
+    }
+
+    [Theory]
+    [InlineData("loading_model", "Loading model…")]
+    [InlineData("inference", "Enhancing…")]
+    [InlineData("encoding", "Saving result…")]
+    [InlineData("unknown", "Working…")]
+    public void Progress_stage_labels_match_worker_stage_names(string stage, string label) =>
+        Assert.Equal(label, ProgressStages.Label(stage));
+
+    [Fact]
     public async Task Success_publishes_result_and_removes_job_directory()
     {
         var client = new FakeClient((r, _, _) => WriteOutput(r));

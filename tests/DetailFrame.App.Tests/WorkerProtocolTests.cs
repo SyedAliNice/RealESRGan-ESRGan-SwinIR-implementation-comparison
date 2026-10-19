@@ -271,6 +271,7 @@ public class WorkerProtocolTests
     [InlineData(@"C:\elsewhere\output.png", 10, 10)]
     [InlineData(@"C:\out\output.png", 0, 10)]
     [InlineData(@"C:\out\output.png", 10, -1)]
+    [InlineData("C:\\out\\bad\0name.png", 10, 10)]
     public async Task Enhance_invalid_complete_is_not_success(string path, int w, int h)
     {
         var req = Request();

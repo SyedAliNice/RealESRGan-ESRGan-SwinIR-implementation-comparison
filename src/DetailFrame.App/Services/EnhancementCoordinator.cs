@@ -19,6 +19,18 @@ public sealed record EnhancementOutcome(EnhancementStatus Status, PublishedResul
 
 public sealed record EnhancementJob(string InputPath, string ModelId, int Scale, string Device, string OutputFormat = "png");
 
+/// <summary>Maps the worker's progress stage names (see worker protocol) to user-facing text.</summary>
+public static class ProgressStages
+{
+    public static string Label(string stage) => stage switch
+    {
+        "loading_model" => "Loading model…",
+        "inference" => "Enhancing…",
+        "encoding" => "Saving result…",
+        _ => "Working…",
+    };
+}
+
 /// <summary>Decodes an output image and returns its pixel size, or null if it is not a readable image.</summary>
 public delegate Task<(int Width, int Height)?> ResultImageValidator(string path, CancellationToken cancellationToken);
 
@@ -30,6 +42,7 @@ public sealed class EnhancementCoordinator : IDisposable
     private readonly object _gate = new();
     private Guid? _activeJob;
     private CancellationTokenSource? _cts;
+    private TaskCompletionSource? _idle;
 
     public EnhancementCoordinator(IWorkerClient client, ResultImageValidator validator, string workRoot)
     {
@@ -63,6 +76,25 @@ public sealed class EnhancementCoordinator : IDisposable
         }
     }
 
+    /// <summary>
+    /// Cancels any active job and waits (bounded) for it to finish, which includes the client's
+    /// cancel grace and worker-kill fallback, so no worker outlives the app.
+    /// </summary>
+    public async Task ShutdownAsync(TimeSpan timeout)
+    {
+        Task? idle;
+        lock (_gate)
+        {
+            _cts?.Cancel();
+            idle = _activeJob is null ? null : _idle?.Task;
+        }
+
+        if (idle is not null)
+        {
+            await Task.WhenAny(idle, Task.Delay(timeout));
+        }
+    }
+
     /// <summary>Removes leftover job directories from earlier runs; call before the first job.</summary>
     public void CleanupStaleWork()
     {
@@ -85,6 +117,7 @@ public sealed class EnhancementCoordinator : IDisposable
             }
 
             _activeJob = jobId;
+            _idle = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
             cts = _cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         }
 
@@ -128,13 +161,17 @@ public sealed class EnhancementCoordinator : IDisposable
         finally
         {
             TryDelete(jobDir);
+            TaskCompletionSource? idle;
             lock (_gate)
             {
                 _activeJob = null;
                 _cts = null;
+                idle = _idle;
+                _idle = null;
             }
 
             cts.Dispose();
+            idle?.TrySetResult();
         }
     }
 

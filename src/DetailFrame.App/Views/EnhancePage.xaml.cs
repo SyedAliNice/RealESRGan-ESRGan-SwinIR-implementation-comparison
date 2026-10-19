@@ -37,14 +37,6 @@ public sealed partial class EnhancePage : UserControl
         StartButton.IsEnabled = state.CanEnhance;
     }
 
-    private static string StageLabel(string stage) => stage switch
-    {
-        "loading" => "Loading model…",
-        "tiles" => "Enhancing…",
-        "encoding" => "Saving result…",
-        _ => "Working…",
-    };
-
     private async void StartButton_Click(object sender, RoutedEventArgs e)
     {
         if (_running || !_state.CanEnhance)
@@ -65,7 +57,7 @@ public sealed partial class EnhancePage : UserControl
 
         var progress = new Progress<EnhancementProgress>(p =>
         {
-            StageText.Text = StageLabel(p.Stage);
+            StageText.Text = ProgressStages.Label(p.Stage);
             JobProgress.IsIndeterminate = false;
             JobProgress.Value = p.Fraction;
         });
