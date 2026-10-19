@@ -16,6 +16,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest==9.1.1"]
+build = ["pyinstaller==6.22.3"]
 
 [project.scripts]
 detailframe-worker = "detailframe_worker.__main__:main"

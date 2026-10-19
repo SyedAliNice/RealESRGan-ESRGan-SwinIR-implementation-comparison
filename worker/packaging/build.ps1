@@ -1,0 +1,31 @@
+$ErrorActionPreference = "Stop"
+
+$workerRoot = Split-Path -Parent $PSScriptRoot
+$repoRoot = Split-Path -Parent $workerRoot
+$python = Join-Path $workerRoot ".venv\Scripts\python.exe"
+$output = Join-Path $repoRoot "artifacts\worker"
+$buildDir = Join-Path $repoRoot "artifacts\build\worker"
+$target = Join-Path $output "win-x64"
+
+Push-Location $workerRoot
+try {
+    uv sync --frozen --extra dev --extra build
+    if ($LASTEXITCODE -ne 0) { throw "uv sync failed" }
+
+    if (Test-Path $target) { Remove-Item -Recurse -Force $target }
+
+    & $python -m PyInstaller --noconfirm --clean `
+        --distpath $output --workpath $buildDir `
+        (Join-Path $PSScriptRoot "detailframe-worker.spec")
+    if ($LASTEXITCODE -ne 0) { throw "PyInstaller failed" }
+
+    $manifest = Join-Path $target "dependency-manifest.txt"
+    uv pip freeze --python $python | Out-File -Encoding ascii $manifest
+    if ($LASTEXITCODE -ne 0) { throw "dependency manifest failed" }
+}
+finally {
+    Pop-Location
+}
+
+$size = (Get-ChildItem -Recurse -File $target | Measure-Object Length -Sum).Sum / 1MB
+"Built $target ({0:N0} MiB)" -f $size
