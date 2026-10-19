@@ -24,6 +24,23 @@ if ($ArtifactsRoot -ne $repoArtifacts -and -not (Test-Under $ArtifactsRoot $repo
 }
 if (-not (Test-Under $ManifestPath $ArtifactsRoot)) { Fail "manifest path escapes the artifact staging directory" }
 
+# Reject reparse points on the path itself and every parent up to the repository root,
+# so a junction or symlink cannot redirect staged inputs to files outside the repository.
+function Assert-NoReparse([string]$Path) {
+    $cur = [IO.Path]::GetFullPath($Path).TrimEnd('\')
+    while ($cur.Length -gt $RepoRoot.Length -and (Test-Under $cur $RepoRoot)) {
+        if (Test-Path -LiteralPath $cur) {
+            if ((Get-Item -LiteralPath $cur -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) {
+                Fail "reparse point not allowed in staging path: $cur"
+            }
+        }
+        $cur = Split-Path -Parent $cur
+    }
+}
+Assert-NoReparse $repoArtifacts
+Assert-NoReparse $ArtifactsRoot
+Assert-NoReparse (Split-Path -Parent $ManifestPath)
+
 $appDir = Join-Path $ArtifactsRoot "app\win-x64"
 $workerDir = Join-Path $ArtifactsRoot "worker\win-x64"
 $installerExe = Join-Path $ArtifactsRoot "installer\DetailFrame-Setup.exe"
@@ -35,9 +52,11 @@ $required = @(
     @{ Dir = $workerDir; File = "detailframe-worker.exe" },
     @{ Dir = $workerDir; File = "dependency-manifest.txt" }
 )
+foreach ($d in @($appDir, $workerDir)) { if (Test-Path -LiteralPath $d) { Assert-NoReparse $d } }
 foreach ($r in $required) {
     if (-not (Test-Path -LiteralPath $r.Dir -PathType Container)) { Fail "missing input directory $($r.Dir)" }
     if (-not (Test-Path -LiteralPath (Join-Path $r.Dir $r.File) -PathType Leaf)) { Fail "missing required input $(Join-Path $r.Dir $r.File)" }
+    Assert-NoReparse (Join-Path $r.Dir $r.File)
 }
 if ($RequireInstaller -and -not (Test-Path -LiteralPath $installerExe -PathType Leaf)) {
     Fail "missing installer output $installerExe"
@@ -58,7 +77,7 @@ foreach ($exe in @((Join-Path $appDir "DetailFrame.App.exe"), (Join-Path $worker
     if ((Get-PeMachine $exe) -ne 0x8664) { Fail "$exe is not an x64 binary" }
 }
 
-function Get-FileEntries([string]$Dir, [string]$Prefix) {
+function Get-FileEntries([string]$Dir, [string]$Prefix, [scriptblock]$Role) {
     $root = [IO.Path]::GetFullPath($Dir).TrimEnd('\')
     $entries = foreach ($item in (Get-ChildItem -LiteralPath $root -Recurse -Force)) {
         if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) { Fail "reparse point not allowed: $($item.FullName)" }
@@ -67,6 +86,7 @@ function Get-FileEntries([string]$Dir, [string]$Prefix) {
         if (-not (Test-Under $full $root)) { Fail "path resolves outside staging directory: $full" }
         [pscustomobject]@{
             path   = "$Prefix/" + $full.Substring($root.Length + 1).Replace('\', '/')
+            role   = (& $Role $full.Substring($root.Length + 1))
             bytes  = $item.Length
             sha256 = (Get-FileHash -LiteralPath $full -Algorithm SHA256).Hash.ToLowerInvariant()
         }
@@ -81,24 +101,31 @@ $appVersion = ($appVersion -split '\+')[0]
 $pyproject = Join-Path $RepoRoot "worker\pyproject.toml"
 $vm = Select-String -Path $pyproject -Pattern '^version\s*=\s*"([^"]+)"' | Select-Object -First 1
 if (-not $vm) { Fail "worker version not found in $pyproject" }
-$workerVersion = $vm.Matches[0].Groups[1].Value
+$expectedWorker = $vm.Matches[0].Groups[1].Value
 
+# The version comes from the built binary; it must agree with the source version.
+$workerOut = (& (Join-Path $workerDir "detailframe-worker.exe") --version 2>&1 | Out-String).Trim()
+if ($LASTEXITCODE -ne 0) { Fail "built worker --version exited with $LASTEXITCODE" }
+$wm = [regex]::Match($workerOut, '(?<![\w.])(\d+(?:\.\d+)+\S*)\s*$')
+if (-not $wm.Success) { Fail "cannot parse built worker version from '$workerOut'" }
+$workerVersion = $wm.Groups[1].Value
+if ($workerVersion -ne $expectedWorker) { Fail "built worker reports $workerVersion but worker/pyproject.toml says $expectedWorker (stale binary?)" }
 $workerInventory = @(Get-Content -LiteralPath (Join-Path $workerDir "dependency-manifest.txt") |
     Where-Object { $_ -and $_ -notmatch '^-e ' } | Sort-Object -CaseSensitive)
 if ($workerInventory.Count -eq 0) { Fail "worker dependency manifest is empty" }
 
-$appRuntime = @(Get-ChildItem -LiteralPath $appDir -File |
-    Where-Object { $_.Name -match '^(Microsoft\..+\.dll|.+\.runtimeconfig\.json|.+\.deps\.json)$' } |
-    Sort-Object Name -CaseSensitive |
-    ForEach-Object {
-        $v = $_.VersionInfo.FileVersion
-        if ($v) { "$($_.Name) $v" } else { $_.Name }
-    })
-
-$files = @(Get-FileEntries $appDir "app/win-x64") + @(Get-FileEntries $workerDir "worker/win-x64")
+# App-owned files are DetailFrame.* binaries plus Assets and shared data; every other published file is runtime.
+$appRole = { param($rel) if ($rel -match '^(DetailFrame\.[^\\]*|Assets\\.*|shared\\.*)$') { "app" } else { "runtime" } }
+$workerRole = { param($rel) "worker" }
+$files = @(Get-FileEntries $appDir "app/win-x64" $appRole) + @(Get-FileEntries $workerDir "worker/win-x64" $workerRole)
+$appRuntime = @($files | Where-Object { $_.role -eq "runtime" } | ForEach-Object {
+    $v = (Get-Item -LiteralPath (Join-Path $ArtifactsRoot ($_.path -replace '/', '\' -replace '^app\\win-x64', 'app\win-x64'))).VersionInfo.FileVersion
+    [pscustomobject]@{ path = $_.path; version = $(if ($v) { $v } else { $null }); sha256 = $_.sha256 }
+})
 if (Test-Path -LiteralPath $installerExe -PathType Leaf) {
     $files += [pscustomobject]@{
         path   = "installer/DetailFrame-Setup.exe"
+        role   = "installer"
         bytes  = (Get-Item $installerExe).Length
         sha256 = (Get-FileHash -LiteralPath $installerExe -Algorithm SHA256).Hash.ToLowerInvariant()
     }

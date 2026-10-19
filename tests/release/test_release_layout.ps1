@@ -17,29 +17,62 @@ foreach ($p in "artifacts/app/win-x64/DetailFrame.App.exe", "artifacts/worker/wi
 Check "no tracked artifacts" (-not (git -C $repo ls-files artifacts))
 
 # Installer inputs: only the two artifact dirs plus versioned installer/branding files.
-$allowed = @('artifacts\app\win-x64', 'artifacts\worker\win-x64', 'installer\', 'src\DetailFrame.App\Assets\Branding')
-$scriptFiles = Get-ChildItem (Join-Path $repo "installer") -Include *.iss, *.wxs, *.nsi -Recurse -ErrorAction SilentlyContinue
-$bad = @()
-foreach ($s in $scriptFiles) {
-    foreach ($m in Select-String -Path $s.FullName -Pattern '(?i)(\.\.\\|artifacts\\[A-Za-z0-9_.-]+\\[A-Za-z0-9_.-]+|src\\[^"'';\r\n]+)') {
-        foreach ($g in $m.Matches) {
-            $v = $g.Value
-            if (-not ($allowed | Where-Object { $v -like "*$_*" })) { $bad += "$($s.Name): $v" }
-        }
+# Inspects installer scripts (.iss/.wxs/.nsi) and the PowerShell build scripts/manifests.
+function Find-BadInputs([string]$Text) {
+    $bad = @()
+    $norm = $Text -replace '/', '\'
+    if ($norm -match '(?i)\.\.\\') { $bad += '..\' }
+    foreach ($m in [regex]::Matches($norm, '(?i)(?:artifacts\\|\$ArtifactsRoot\s+")([A-Za-z0-9_.\\-]+)')) {
+        $v = $m.Groups[1].Value
+        if ($v -notmatch '(?i)^(app\\win-x64|worker\\win-x64|installer)(\\|$)') { $bad += "artifacts\$v" }
     }
+    foreach ($m in [regex]::Matches($norm, '(?i)src\\[A-Za-z0-9_.\\-]+')) {
+        if ($m.Value -notlike 'src\DetailFrame.App\Assets\Branding*' -and $m.Value -notlike '*.csproj') { $bad += $m.Value }
+    }
+    return $bad
 }
-Check "installer scripts reference only allowed inputs ($($bad -join '; '))" ($bad.Count -eq 0)
-
+$inspected = @(Get-ChildItem (Join-Path $repo "installer") -Include *.iss, *.wxs, *.nsi, *.ps1 -Recurse -File)
+$bad = @(); $validRefs = 0
+foreach ($s in $inspected) {
+    $text = Get-Content $s.FullName -Raw
+    $bad += Find-BadInputs $text | ForEach-Object { "$($s.Name): $_" }
+    $validRefs += [regex]::Matches(($text -replace '/', '\'), '(?i)(app|worker)\\win-x64').Count
+}
+Check "input policy inspects build scripts (not vacuous)" ($inspected.Name -contains "build.ps1" -and $inspected.Name -contains "verify-artifacts.ps1" -and $validRefs -ge 4)
+Check "installer/build scripts reference only allowed inputs ($($bad -join '; '))" ($bad.Count -eq 0)
+Check "input policy rejects disallowed artifact dir" ((Find-BadInputs 'Source: "artifacts\other\x\*"').Count -gt 0)
+Check "input policy rejects parent-relative path" ((Find-BadInputs 'Source: "..\secrets\*"').Count -gt 0)
+Check "input policy rejects arbitrary src path" ((Find-BadInputs 'Source: "src\Other\bin\*"').Count -gt 0)
+Check "input policy rejects bad ArtifactsRoot join" ((Find-BadInputs '$d = Join-Path $ArtifactsRoot "tools\x"').Count -gt 0)
+Check "input policy accepts allowed inputs" ((Find-BadInputs 'Source: "artifacts\app\win-x64\*"; Source: "src\DetailFrame.App\Assets\Branding\app.ico"').Count -eq 0)
 # Verifier behaviour on fixtures inside the ignored artifacts directory.
 $verify = Join-Path $repo "installer\verify-artifacts.ps1"
 $fixture = Join-Path $repo "artifacts\test-fixture\layout"
+$pyVersion = [regex]::Match((Get-Content (Join-Path $repo "worker\pyproject.toml") -Raw), '(?m)^version\s*=\s*"([^"]+)"').Groups[1].Value
+$WorkerStubVersion = $pyVersion
+$stubCache = @{}
+# Compiles a tiny x64 console exe that prints a worker version, using the in-box .NET Framework C# compiler.
+function New-WorkerStub([string]$Version) {
+    if ($stubCache.ContainsKey($Version)) { return $stubCache[$Version] }
+    $dir = Join-Path $repo "artifacts\test-fixture-stubs"
+    New-Item -ItemType Directory -Force $dir | Out-Null
+    $exe = Join-Path $dir "worker-$Version.exe"
+    $cs = Join-Path $dir "worker-$Version.cs"
+    Set-Content $cs "public class P { public static void Main() { System.Console.WriteLine(`"detailframe-worker $Version`"); } }"
+    $csc = Join-Path $env:SystemRoot "Microsoft.NET\Framework64\v4.0.30319\csc.exe"
+    & $csc /nologo /platform:x64 "/out:$exe" $cs *> $null
+    $stubCache[$Version] = $exe
+    return $exe
+}
 function New-Fixture {
     if (Test-Path $fixture) { Remove-Item -Recurse -Force $fixture }
     $app = Join-Path $fixture "app\win-x64"; $wk = Join-Path $fixture "worker\win-x64"
-    New-Item -ItemType Directory -Force "$app\shared", "$app\Assets\Branding", $wk | Out-Null
+    New-Item -ItemType Directory -Force "$app\shared", "$app\Assets\Branding", "$app\sub", $wk | Out-Null
     # Real x64 PE binaries stand in for the produced executables.
     $stub = Join-Path $env:SystemRoot "System32\whoami.exe"
-    Copy-Item $stub "$app\DetailFrame.App.exe"; Copy-Item $stub "$wk\detailframe-worker.exe"
+    Copy-Item $stub "$app\DetailFrame.App.exe"
+    Copy-Item (New-WorkerStub $WorkerStubVersion) "$wk\detailframe-worker.exe"
+    Set-Content "$app\System.Runtime.dll" "r"; Set-Content "$app\coreclr.dll" "c"; Set-Content "$app\sub\native.bin" "n"
     Set-Content "$app\shared\models.json" "{}"; Set-Content "$app\Assets\Branding\app.ico" "x"
     Set-Content "$wk\dependency-manifest.txt" "numpy==1.0`nattrs==2.0"
 }
@@ -58,6 +91,9 @@ try {
     $json = $m1 | ConvertFrom-Json
     Check "manifest records versions, arch, hashes" ($json.appVersion -and $json.workerVersion -and $json.architecture -eq "x64" -and ($json.files | Where-Object { $_.sha256.Length -ne 64 }).Count -eq 0)
     Check "manifest records dependency inventory" ($json.workerPackages.Count -eq 2)
+    Check "manifest worker version comes from built exe" ($json.workerVersion -eq $pyVersion)
+    Check "runtime inventory is comprehensive (all runtime files, hashed)" (($json.appRuntime.path -contains "app/win-x64/System.Runtime.dll") -and ($json.appRuntime.path -contains "app/win-x64/coreclr.dll") -and ($json.appRuntime.path -contains "app/win-x64/sub/native.bin") -and ($json.appRuntime | Where-Object { $_.sha256.Length -ne 64 }).Count -eq 0)
+    Check "app/runtime/worker roles separated" (($json.files | Where-Object { $_.path -eq "app/win-x64/DetailFrame.App.exe" }).role -eq "app" -and ($json.files | Where-Object { $_.path -eq "app/win-x64/coreclr.dll" }).role -eq "runtime" -and ($json.files | Where-Object { $_.path -eq "worker/win-x64/detailframe-worker.exe" }).role -eq "worker")
     Check "verify fails when installer required but absent" (-not (Invoke-Verify @{ RequireInstaller = $true }))
 
     Remove-Item "$fixture\worker\win-x64\detailframe-worker.exe"
@@ -76,12 +112,35 @@ try {
     Check "verify fails on junction escaping staging" (-not (Invoke-Verify))
     cmd /c rmdir "$link"
 
+    $script:WorkerStubVersion = "0.0.1-stale"
+    New-Fixture
+    Check "verify fails on stale worker binary (version mismatch)" (-not (Invoke-Verify))
+    $script:WorkerStubVersion = $pyVersion
+
+    New-Fixture
+    $outW = Join-Path $fixture "..\outside-w"
+    New-Item -ItemType Directory -Force $outW | Out-Null
+    Remove-Item -Recurse -Force "$fixture\worker\win-x64"
+    cmd /c mklink /J "$fixture\worker\win-x64" "$outW" *> $null
+    Check "worker root junction created" (Test-Path "$fixture\worker\win-x64")
+    Check "verify fails when worker root is a junction" (-not (Invoke-Verify))
+    cmd /c rmdir "$fixture\worker\win-x64"
+
+    New-Fixture
+    Remove-Item -Recurse -Force "$fixture\app"
+    cmd /c mklink /J "$fixture\app" "$outW" *> $null
+    Check "verify fails when staging parent (app) is a junction" (-not (Invoke-Verify))
+    cmd /c rmdir "$fixture\app"
+
     $ok = $true
     try { & pwsh -NoProfile -File $verify -RepoRoot $repo -ArtifactsRoot $env:TEMP *> $null; $ok = ($LASTEXITCODE -eq 0) } catch { $ok = $false }
     Check "verify rejects artifact root outside repository" (-not $ok)
 }
 finally {
-    if (Test-Path (Join-Path $repo "artifacts\test-fixture")) { Remove-Item -Recurse -Force (Join-Path $repo "artifacts\test-fixture") }
+    foreach ($d in "test-fixture", "test-fixture-stubs", "outside", "outside-w") {
+        $x = Join-Path $repo "artifacts\$d"
+        if (Test-Path $x) { Remove-Item -Recurse -Force $x }
+    }
 }
 
 if ($failures.Count -gt 0) { "FAILED: $($failures.Count) check(s)"; exit 1 }

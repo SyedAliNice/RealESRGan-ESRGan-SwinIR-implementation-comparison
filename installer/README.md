@@ -14,7 +14,7 @@ Installer inputs are limited to the two artifact directories plus versioned file
 ## Scripts
 
 - `pwsh installer/build.ps1 [-SkipWorker] [-SkipApp]` builds the worker and app, then verifies.
-- `pwsh installer/verify-artifacts.ps1 [-RequireInstaller]` fails if an input is missing, a binary is not x64, any path is a reparse point or resolves outside the staging directory, or the artifact root is outside `<repo>/artifacts`. It writes a deterministic (timestamp-free) manifest with app version, worker version, architecture, worker package inventory, app runtime inventory and SHA-256 of every file.
+- `pwsh installer/verify-artifacts.ps1 [-RequireInstaller]` fails if an input is missing, a binary is not x64, the staging roots, their parents or any file is a reparse point or resolves outside the staging directory, the built `detailframe-worker.exe --version` disagrees with `worker/pyproject.toml`, or the artifact root is outside `<repo>/artifacts`. It writes a deterministic (timestamp-free) manifest with app version, worker version, architecture, worker package inventory, a comprehensive app runtime inventory (every published file that is not app-owned, with version and SHA-256) and a SHA-256 plus `app`/`runtime`/`worker` role for every file. The worker version is read from the built executable.
 - `pwsh tests/release/test_release_layout.ps1` checks the layout rules and verifier behaviour against fixtures.
 
 ## Installer tool decision: Inno Setup 6
@@ -24,6 +24,6 @@ Evidence gathered 2026-10-20:
 - Available: `winget search "Inno Setup"` lists `JRSoftware.InnoSetup` 6.7.3 and `JRSoftware.InnoSetup.7` 7.1.0; jrsoftware.org/isdl.php lists 6.x and 7.x downloads and source.
 - Maintenance: active; 6.6 and 6.7 shipped dark mode, custom wizard images and RedirectionGuard support.
 - License: free to use and distribute installers; the vendor asks commercial users to purchase a license (isorder.php). Review before commercial release.
-- Fit: a single `.iss` script compiled by `ISCC.exe` produces one per-user/per-machine `DetailFrame-Setup.exe` from plain directories, which suits an unpackaged app plus a PyInstaller folder. Alternatives (WiX 5+ carries an Open Source Maintenance Fee for some use; NSIS has less active maintenance) were not chosen.
+- Fit: a single `.iss` script compiled by `ISCC.exe` produces one per-user/per-machine `DetailFrame-Setup.exe` from plain directories, which suits an unpackaged app plus a PyInstaller folder. Comparisons with WiX and NSIS were not researched or verified and are not part of the justification for this choice.
 
 Inno Setup 6 is the stable line; 7.x is acceptable if the later installer task prefers it. The compiler is not required for Task 1.
