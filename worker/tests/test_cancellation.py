@@ -2,6 +2,7 @@ import io
 import json
 import queue
 import threading
+import time
 from uuid import UUID
 
 import pytest
@@ -156,12 +157,23 @@ def test_worker_reports_cancel_for_inactive_job_as_error(tmp_path):
 def test_cancel_request_reaches_active_worker_job(tmp_path, paths, monkeypatch):
     from detailframe_worker.worker import run_worker
 
-    started, release = threading.Event(), threading.Event()
+    started = threading.Event()
+    tokens = []
+    real_enhance = engine.enhance
+
+    def capture(**kwargs):
+        tokens.append(kwargs["cancelled"])
+        return real_enhance(**kwargs)
+
+    monkeypatch.setattr(engine, "enhance", capture)
 
     class Blocking(torch.nn.Module):
         def forward(self, tensor):
             started.set()
-            assert release.wait(5)
+            deadline = time.monotonic() + 5
+            while not tokens[0].is_set():
+                assert time.monotonic() < deadline, "cancel never observed"
+                time.sleep(0.005)
             return torch.nn.functional.interpolate(tensor, scale_factor=2, mode="nearest")
 
     monkeypatch.setitem(engine.ADAPTERS, "test-nearest", ModelAdapter(lambda _v, _s: Blocking()))
@@ -187,7 +199,6 @@ def test_cancel_request_reaches_active_worker_job(tmp_path, paths, monkeypatch):
     lines.put(json.dumps(enhance) + "\n")
     assert started.wait(5)
     lines.put(json.dumps({"protocol_version": 1, "type": "cancel", "job_id": str(JOB_ID)}) + "\n")
-    release.set()
     for _ in range(100):
         if '"cancelled"' in stdout.getvalue() or '"complete"' in stdout.getvalue():
             break
