@@ -22,6 +22,7 @@
     <Compile Include="..\..\src\DetailFrame.App\Models\ModelCatalog.cs" Link="Models\ModelCatalog.cs" />
     <Compile Include="..\..\src\DetailFrame.App\Services\ModelCatalogService.cs" Link="Services\ModelCatalogService.cs" />
     <Compile Include="..\..\src\DetailFrame.App\Services\ModelDownloadService.cs" Link="Services\ModelDownloadService.cs" />
+    <Compile Include="..\..\src\DetailFrame.App\Services\ValidationManifestVerifier.cs" Link="Services\ValidationManifestVerifier.cs" />
   </ItemGroup>
 
 </Project>

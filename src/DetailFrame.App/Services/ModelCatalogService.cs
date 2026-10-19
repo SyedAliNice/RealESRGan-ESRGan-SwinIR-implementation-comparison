@@ -28,10 +28,13 @@ public sealed class ModelCatalogService
         [.. RequiredKeys, "size_bytes", "validation_manifest"];
 
     private readonly string _catalogPath;
+    private readonly IReadOnlyDictionary<string, string> _reviewedManifests;
 
-    public ModelCatalogService(string catalogPath)
+    public ModelCatalogService(
+        string catalogPath, IReadOnlyDictionary<string, string>? reviewedManifests = null)
     {
         _catalogPath = catalogPath;
+        _reviewedManifests = reviewedManifests ?? ValidationManifestVerifier.ReviewedManifests;
     }
 
     public static string DefaultCatalogPath =>
@@ -49,10 +52,11 @@ public sealed class ModelCatalogService
             throw new CatalogException("The model catalog could not be read.", ex);
         }
 
-        return Parse(text);
+        return Parse(text, Path.GetDirectoryName(Path.GetFullPath(_catalogPath))!, _reviewedManifests);
     }
 
-    public static IReadOnlyList<ModelVariant> Parse(string json)
+    public static IReadOnlyList<ModelVariant> Parse(
+        string json, string catalogDirectory, IReadOnlyDictionary<string, string>? reviewedManifests = null)
     {
         try
         {
@@ -73,7 +77,7 @@ public sealed class ModelCatalogService
             var seen = new HashSet<(string, int)>();
             foreach (var entry in models.EnumerateArray())
             {
-                var variant = TryReadEntry(entry);
+                var variant = TryReadEntry(entry, catalogDirectory, reviewedManifests ?? ValidationManifestVerifier.ReviewedManifests);
                 if (variant is not null && seen.Add((variant.Id, variant.Scale)))
                 {
                     result.Add(variant);
@@ -88,8 +92,9 @@ public sealed class ModelCatalogService
         }
     }
 
-    // Returns null for malformed, disabled, or evidence-incomplete entries.
-    private static ModelVariant? TryReadEntry(JsonElement e)
+    // Returns null for malformed, disabled, or entries without a reviewed validation manifest.
+    private static ModelVariant? TryReadEntry(
+        JsonElement e, string catalogDirectory, IReadOnlyDictionary<string, string> reviewed)
     {
         if (e.ValueKind != JsonValueKind.Object)
         {
@@ -171,7 +176,10 @@ public sealed class ModelCatalogService
             return null;
         }
 
-        return new ModelVariant(id, name, arch, scale, file, url, sha, license, provenance, size, devices, manifest);
+        var variant = new ModelVariant(id, name, arch, scale, file, url, sha, license, provenance, size, devices, manifest);
+        return ValidationManifestVerifier.Verify(Path.Combine(catalogDirectory, manifest), variant, reviewed)
+            ? variant
+            : null;
     }
 
     private static bool Str(JsonElement e, string key, out string value)
@@ -198,7 +206,6 @@ public sealed class ModelCatalogService
         return Uri.TryCreate(value, UriKind.Absolute, out var uri)
             && uri.Scheme == Uri.UriSchemeHttps
             && string.IsNullOrEmpty(uri.UserInfo)
-            && !string.IsNullOrEmpty(uri.Host)
-            && uri.AbsolutePath.Length > 1;
+            && !string.IsNullOrEmpty(uri.Host);
     }
 }

@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using DetailFrame.App.Models;
@@ -6,12 +8,12 @@ using Xunit;
 
 namespace DetailFrame.App.Tests;
 
-public class ModelCatalogServiceTests
+public sealed class ModelCatalogServiceTests : IDisposable
 {
     private const string Sha = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
     private static string Entry(
-        string id = "test-model", int scale = 4, bool enabled = true, string devices = "\"cpu\",\"cuda\"",
+        string id = "test-model", int scale = 4, bool enabled = true, string devices = "\"cpu\"",
         string url = "https://example.test/w.bin", string extra = "\"validation_manifest\":\"m.json\",",
         string file = "w.bin", string sha = Sha) =>
         $$"""
@@ -22,6 +24,50 @@ public class ModelCatalogServiceTests
 
     private static string Catalog(params string[] entries) =>
         $$"""{"schema_version":1,"models":[{{string.Join(",", entries)}}]}""";
+
+
+    private readonly string _dir = Directory.CreateDirectory(
+        Path.Combine(Path.GetTempPath(), "dfcat-" + Guid.NewGuid().ToString("N"))).FullName;
+
+    public void Dispose() => Directory.Delete(_dir, true);
+
+    private static string Hex(string text) =>
+        Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(text))).ToLowerInvariant();
+
+    private static string Manifest(
+        string id = "test-model", int scale = 4, string sha = Sha, string devices = "cpu",
+        string url = "https://example.test/w.bin", string? configSha = null, string torch = "2.4.0")
+    {
+        configSha ??= Hex($$"""{"architecture":"rrdb","config":{"nf":64},"scale":{{scale}}}""");
+        var records = string.Join(",", devices.Split(',').Select(d =>
+            "\"" + d + "\":{\"status\":\"passed\",\"tested_at\":\"2026-01-02\",\"torch_version\":\""
+            + torch + "\",\"checkpoint_sha256\":\"" + sha + "\"}"));
+        var dv = "{" + records + "}";
+        return $$$"""
+            {"manifest_version":1,"model_id":"{{{id}}}","checkpoint_sha256":"{{{sha}}}","weight_url":"{{{url}}}",
+             "license":"MIT","provenance_url":"https://example.test/p","architecture":"rrdb","scale":{{{scale}}},
+             "architecture_config":{"nf":64},"architecture_config_sha256":"{{{configSha}}}",
+             "expected_state_dict":{"conv.weight":[64,3,3,3]},"device_validation":{{{dv}}}}
+            """;
+    }
+
+    // Writes m.json (when given) and reviews its digest for test-model unless reviewedId is null.
+    private IReadOnlyList<ModelVariant> Parse(
+        string catalog, string? manifest = null, string? reviewedId = "test-model", string file = "m.json")
+    {
+        var reviewed = new Dictionary<string, string>();
+        if (manifest is not null)
+        {
+            File.WriteAllText(Path.Combine(_dir, file), manifest);
+            if (reviewedId is not null)
+            {
+                reviewed[Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(manifest))).ToLowerInvariant()] =
+                    reviewedId;
+            }
+        }
+
+        return ModelCatalogService.Parse(catalog, _dir, reviewed);
+    }
 
     private static string RepoFile(string relative)
     {
@@ -37,16 +83,91 @@ public class ModelCatalogServiceTests
     [Fact]
     public void Valid_enabled_entry_is_returned()
     {
-        var models = ModelCatalogService.Parse(Catalog(Entry()));
+        var models = Parse(Catalog(Entry()), Manifest());
         var m = Assert.Single(models);
         Assert.Equal("test-model", m.Id);
         Assert.Equal(4, m.Scale);
     }
 
     [Fact]
+    public void Missing_manifest_file_drops_entry()
+    {
+        Assert.Empty(Parse(Catalog(Entry())));
+    }
+
+    [Theory]
+    [InlineData("{not json")]
+    [InlineData("[]")]
+    [InlineData("{}")]
+    public void Malformed_manifest_drops_entry(string manifest)
+    {
+        Assert.Empty(Parse(Catalog(Entry()), manifest));
+    }
+
+    [Fact]
+    public void Manifest_not_on_reviewed_allowlist_drops_entry()
+    {
+        Assert.Empty(Parse(Catalog(Entry()), Manifest(), reviewedId: null));
+        Assert.Empty(Parse(Catalog(Entry()), Manifest(), reviewedId: "other-model"));
+        Assert.Empty(ModelCatalogService.Parse(Catalog(Entry()), _dir));
+    }
+
+    [Fact]
+    public void Shipped_allowlist_is_empty()
+    {
+        Assert.Empty(ValidationManifestVerifier.ReviewedManifests);
+    }
+
+    [Theory]
+    [InlineData("sha")]
+    [InlineData("url")]
+    [InlineData("config")]
+    [InlineData("device")]
+    [InlineData("id")]
+    [InlineData("torch")]
+    public void Manifest_evidence_mismatch_drops_entry(string kind)
+    {
+        var other = new string('a', 64);
+        var manifest = kind switch
+        {
+            "sha" => Manifest(sha: other),
+            "url" => Manifest(url: "https://example.test/other.bin"),
+            "config" => Manifest(configSha: other),
+            "device" => Manifest(devices: "cuda"),
+            "id" => Manifest(id: "other-model"),
+            _ => Manifest(torch: ""),
+        };
+        Assert.Empty(Parse(Catalog(Entry()), manifest));
+    }
+
+    [Fact]
+    public void Manifest_missing_a_required_field_or_cpu_validation_drops_entry()
+    {
+        Assert.Empty(Parse(Catalog(Entry()), Manifest().Replace("\"license\":\"MIT\",", "")));
+        Assert.Empty(Parse(Catalog(Entry(devices: "\"cpu\",\"cuda\"")), Manifest()));
+    }
+
+    [Fact]
+    public void Valid_manifest_with_both_devices_enables_entry()
+    {
+        var m = Assert.Single(Parse(Catalog(Entry(devices: "\"cpu\",\"cuda\"")), Manifest(devices: "cpu,cuda")));
+        Assert.Equal(new[] { "cpu", "cuda" }, m.Devices);
+    }
+
+    [Theory]
+    [InlineData("https://example.test/")]
+    [InlineData("https://example.test")]
+    [InlineData("https://example.test/a?x=1")]
+    public void Valid_schema_urls_including_bare_host_are_accepted(string url)
+    {
+        Assert.True(ModelCatalogService.IsHttpsUrl(url));
+        Assert.Single(Parse(Catalog(Entry(url: url)), Manifest(url: url)));
+    }
+
+    [Fact]
     public void Disabled_entries_are_excluded()
     {
-        Assert.Empty(ModelCatalogService.Parse(Catalog(Entry(enabled: false))));
+        Assert.Empty(Parse(Catalog(Entry(enabled: false)), Manifest()));
     }
 
     [Theory]
@@ -59,28 +180,28 @@ public class ModelCatalogServiceTests
     [InlineData("ok", 4, "https://example.test/w.bin", "w.bin", "ABC")]
     public void Malformed_entries_are_rejected(string id, int scale, string url, string file, string sha)
     {
-        Assert.Empty(ModelCatalogService.Parse(Catalog(Entry(id: id, scale: scale, url: url, file: file, sha: sha))));
+        Assert.Empty(Parse(Catalog(Entry(id: id, scale: scale, url: url, file: file, sha: sha)), Manifest()));
     }
 
     [Fact]
     public void Enabled_entry_without_manifest_or_cpu_is_rejected()
     {
-        Assert.Empty(ModelCatalogService.Parse(Catalog(Entry(extra: ""))));
-        Assert.Empty(ModelCatalogService.Parse(Catalog(Entry(devices: "\"cuda\""))));
+        Assert.Empty(Parse(Catalog(Entry(extra: "")), Manifest()));
+        Assert.Empty(Parse(Catalog(Entry(devices: "\"cuda\"")), Manifest(devices: "cuda")));
     }
 
     [Fact]
     public void Unknown_properties_and_bad_types_are_rejected_without_throwing()
     {
-        Assert.Empty(ModelCatalogService.Parse(Catalog(Entry(extra: "\"validation_manifest\":\"m.json\",\"x\":1,"))));
-        Assert.Empty(ModelCatalogService.Parse(Catalog(Entry().Replace("\"scale\":4", "\"scale\":\"4\""))));
-        Assert.Empty(ModelCatalogService.Parse(Catalog("42", "null")));
+        Assert.Empty(Parse(Catalog(Entry(extra: "\"validation_manifest\":\"m.json\",\"x\":1,")), Manifest()));
+        Assert.Empty(Parse(Catalog(Entry().Replace("\"scale\":4", "\"scale\":\"4\"")), Manifest()));
+        Assert.Empty(Parse(Catalog("42", "null")));
     }
 
     [Fact]
     public void Valid_entries_survive_next_to_malformed_ones()
     {
-        var models = ModelCatalogService.Parse(Catalog(Entry(id: "Bad"), Entry(id: "good", scale: 2)));
+        var models = Parse(Catalog(Entry(id: "Bad"), Entry(id: "good", scale: 2)), Manifest(id: "good", scale: 2), "good");
         Assert.Equal("good", Assert.Single(models).Id);
     }
 
@@ -91,7 +212,7 @@ public class ModelCatalogServiceTests
     [InlineData("[]")]
     public void Malformed_catalog_throws(string text)
     {
-        Assert.Throws<CatalogException>(() => ModelCatalogService.Parse(text));
+        Assert.Throws<CatalogException>(() => ModelCatalogService.Parse(text, _dir));
     }
 
     [Fact]

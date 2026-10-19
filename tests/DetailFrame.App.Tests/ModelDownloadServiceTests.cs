@@ -98,6 +98,24 @@ public sealed class ModelDownloadServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task Same_length_corrupted_cache_is_not_installed_and_is_redownloaded()
+    {
+        var handler = new FakeHandler(_ => Ok());
+        var svc = Service(handler);
+        var v = Variant(size: Payload.Length);
+        var installed = await svc.DownloadAndVerifyAsync(v, new Collector(), CancellationToken.None);
+
+        var corrupted = (byte[])Payload.Clone();
+        corrupted[1000] ^= 0xFF;
+        await File.WriteAllBytesAsync(installed.Path, corrupted);
+
+        Assert.Null(svc.GetInstalled(v));
+        await svc.DownloadAndVerifyAsync(v, new Collector(), CancellationToken.None);
+        Assert.Equal(2, handler.Calls);
+        Assert.Equal(Payload, await File.ReadAllBytesAsync(installed.Path));
+    }
+
+    [Fact]
     public async Task Installed_model_is_reused_without_network()
     {
         var handler = new FakeHandler(_ => Ok());

@@ -33,6 +33,21 @@ public sealed class ModelDownloadService
             return null;
         }
 
+        // Re-hash so same-length corruption of a cached file is never treated as installed.
+        try
+        {
+            using var stream = new FileStream(info.FullName, FileMode.Open, FileAccess.Read, FileShare.Read);
+            var digest = Convert.ToHexString(SHA256.HashData(stream)).ToLowerInvariant();
+            if (digest != variant.Sha256)
+            {
+                return null;
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
+
         return new InstalledModel(variant, info.FullName, info.Length);
     }
 
