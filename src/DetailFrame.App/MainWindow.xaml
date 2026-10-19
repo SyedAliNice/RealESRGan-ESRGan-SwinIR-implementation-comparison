@@ -44,6 +44,10 @@
                             Visibility="Collapsed"
                             HorizontalContentAlignment="Stretch"
                             VerticalContentAlignment="Stretch" />
+            <ContentControl x:Name="SaveHost"
+                            Visibility="Collapsed"
+                            HorizontalContentAlignment="Stretch"
+                            VerticalContentAlignment="Stretch" />
         </Grid>
     </Grid>
 </Window>

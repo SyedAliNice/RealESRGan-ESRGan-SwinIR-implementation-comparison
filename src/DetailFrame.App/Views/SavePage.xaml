@@ -1,0 +1,28 @@
+<UserControl
+    x:Class="DetailFrame.App.Views.SavePage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <ScrollViewer>
+        <StackPanel Padding="32" Spacing="16" MaxWidth="640" HorizontalAlignment="Left">
+            <TextBlock Style="{StaticResource TitleTextBlockStyle}"
+                       Text="Save"
+                       AutomationProperties.HeadingLevel="Level1" />
+
+            <TextBlock x:Name="Summary" TextWrapping="Wrap" />
+
+            <TextBlock x:Name="FormatNote"
+                       TextWrapping="Wrap"
+                       Style="{StaticResource CaptionTextBlockStyle}" />
+
+            <InfoBar x:Name="StatusBar"
+                     Severity="Informational"
+                     IsClosable="True"
+                     IsOpen="False" />
+
+            <Button x:Name="SaveButton"
+                    Content="Save as…"
+                    Style="{StaticResource AccentButtonStyle}"
+                    Click="SaveButton_Click" />
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>
