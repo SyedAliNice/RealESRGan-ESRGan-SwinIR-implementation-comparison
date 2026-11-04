@@ -9,7 +9,7 @@ namespace DetailFrame.App.Services;
 
 /// <summary>
 /// Mirrors worker/src/detailframe_worker/data/validation-manifest.schema.json and the worker's
-/// reviewed-manifest allowlist so the app never enables a model the worker would reject.
+/// shared reviewed-manifest allowlist so the app never enables a model the worker would reject.
 /// </summary>
 public static class ValidationManifestVerifier
 {
@@ -23,9 +23,41 @@ public static class ValidationManifestVerifier
     private static readonly HashSet<string> RecordKeys =
         ["status", "tested_at", "torch_version", "checkpoint_sha256"];
 
-    // Add a manifest digest only after independently reviewing its exact contents (same as the worker).
-    public static IReadOnlyDictionary<string, string> ReviewedManifests { get; } =
-        new Dictionary<string, string>();
+    public static string DefaultTrustPath =>
+        Path.Combine(AppContext.BaseDirectory, "shared", "reviewed-manifests.json");
+
+    public static IReadOnlyDictionary<string, string> LoadReviewedManifests(string path)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(File.ReadAllBytes(path));
+            var root = document.RootElement;
+            var rootProperties = root.ValueKind == JsonValueKind.Object
+                ? root.EnumerateObject().ToArray() : [];
+            if (rootProperties.Length != 2
+                || rootProperties.Select(p => p.Name).Distinct().Count() != 2
+                || !root.TryGetProperty("schema_version", out var version)
+                || version.ValueKind != JsonValueKind.Number || !version.TryGetInt32(out var v) || v != 1
+                || !root.TryGetProperty("manifests", out var manifests)
+                || manifests.ValueKind != JsonValueKind.Object)
+                throw new CatalogException("The reviewed manifest trust data has an unsupported format.");
+
+            var result = new Dictionary<string, string>(StringComparer.Ordinal);
+            foreach (var entry in manifests.EnumerateObject())
+            {
+                if (!Regex.IsMatch(entry.Name, @"\A[0-9a-f]{64}\z")
+                    || entry.Value.ValueKind != JsonValueKind.String
+                    || !Regex.IsMatch(entry.Value.GetString()!, @"\A[a-z0-9]+(?:-[a-z0-9]+)*\z")
+                    || !result.TryAdd(entry.Name, entry.Value.GetString()!))
+                    throw new CatalogException("The reviewed manifest trust data contains an invalid digest or model ID.");
+            }
+            return result;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+        {
+            throw new CatalogException($"The reviewed manifest trust data could not be read: {path}", ex);
+        }
+    }
 
     public static bool Verify(
         string manifestPath,

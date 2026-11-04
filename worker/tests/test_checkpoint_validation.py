@@ -64,10 +64,8 @@ def catalog_variant(directory: Path, checkpoint: Path, state, monkeypatch):
     manifest_path = directory / "test.manifest.json"
     manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
     manifest_digest = hashlib.sha256(manifest_path.read_bytes()).hexdigest()
-    monkeypatch.setitem(
-        catalog_module.REVIEWED_VALIDATION_MANIFESTS,
-        manifest_digest,
-        "test-x2",
+    monkeypatch.setattr(
+        catalog_module, "_load_reviewed_manifests", lambda: {manifest_digest: "test-x2"}
     )
     entry = {
         "id": "test-x2",

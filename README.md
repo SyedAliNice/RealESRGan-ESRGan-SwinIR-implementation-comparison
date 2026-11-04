@@ -78,6 +78,10 @@ Change real-esrgan to esrgan or swinir as needed.
 
 Build and test (Windows 11 target; builds require Windows 10 version 2004 / build 19041 or later, .NET 10 SDK):
 
+    cd worker
+    uv sync --frozen --extra dev
+    .venv\Scripts\python.exe -m pytest tests -q
+    cd ..
     dotnet test DetailFrame.sln
     dotnet build src/DetailFrame.App/DetailFrame.App.csproj -c Release -p:Platform=x64
     src\DetailFrame.App\bin\x64\Release\net10.0-windows10.0.19041.0\DetailFrame.App.exe
@@ -86,9 +90,11 @@ Branding assets live in `src/DetailFrame.App/Assets/Branding/` (ICO, SVG, PNG 16
 
 The shipped model catalog (`shared/models.json`) is currently empty, so no real enhancement can run yet; the workflow is covered by tests with a fake worker.
 
-The installed app and worker use the catalog, schema, and reviewed manifest files in the app's `shared` directory. Verified downloads are stored per user at `%LOCALAPPDATA%\DetailFrame\Models\<sha256>\<filename>`; downloads are limited to 4 GiB even when no size is listed. Worker diagnostics use rotating files under `%LOCALAPPDATA%\DetailFrame\Logs` (1 MiB per file, three backups) and omit image paths and content. The empty production manifest allowlists remain a release gate for every model.
+The .NET integration tests require `worker\.venv\Scripts\python.exe` and its worker development dependencies; missing prerequisites fail the tests rather than silently skipping them.
 
-Installer compilation, installation and upgrade/uninstall, clean Windows 11 VM testing, manual UI/accessibility checks, a rebuilt packaged worker, and real model-backed inference remain unverified release gates; see `tests/release/release-checklist.md`.
+The installed app and worker use the catalog, schema, reviewed manifest files and the canonical `shared\reviewed-manifests.json` trust data in the app's installation directory, never in the user model cache. The trust file maps lowercase SHA-256 manifest digests to model IDs and must remain empty until each exact manifest is independently reviewed. Verified downloads are stored per user at `%LOCALAPPDATA%\DetailFrame\Models\<sha256>\<filename>`; downloads are limited to 4 GiB even when no size is listed. Worker diagnostics use rotating files under `%LOCALAPPDATA%\DetailFrame\Logs` (1 MiB per file, three backups) and omit image paths and content. The empty production manifest trust data remains a release gate for every model.
+
+Installer compilation, installation and upgrade/uninstall, clean Windows 11 VM testing, manual UI/accessibility checks, rebuilding the release-staged worker, and real model-backed inference remain unverified release gates; see `tests/release/release-checklist.md`.
 
 ## Windows 11 manual acceptance checklist
 

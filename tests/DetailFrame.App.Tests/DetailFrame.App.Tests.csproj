@@ -15,6 +15,9 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Content Include="..\..\shared\reviewed-manifests.json" Link="shared\reviewed-manifests.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+  <ItemGroup>
     <!-- Plain C# state is compiled directly so tests need not load the WinUI project. -->
     <Compile Include="..\..\src\DetailFrame.App\Controls\ComparisonViewState.cs" Link="Controls\ComparisonViewState.cs" />
     <Compile Include="..\..\src\DetailFrame.App\Controls\ViewerInputMapper.cs" Link="Controls\ViewerInputMapper.cs" />

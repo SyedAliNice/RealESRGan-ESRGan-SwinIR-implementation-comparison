@@ -16,6 +16,7 @@ from PIL import Image, UnidentifiedImageError
 from detailframe_worker.catalog import (
     CheckpointValidationError,
     ModelVariant,
+    TrustDataError,
     load_catalog,
     validate_checkpoint,
 )
@@ -74,6 +75,8 @@ def _load_state_dict(variant: ModelVariant, models_dir: Path) -> dict[str, Any]:
         if variant.size_bytes is not None and len(payload) != variant.size_bytes:
             raise CheckpointValidationError("checkpoint size changed during loading")
         state_dict = torch.load(io.BytesIO(payload), map_location="cpu", weights_only=True)
+    except TrustDataError as error:
+        raise ProtocolError("MODEL_UNAVAILABLE", "The installed reviewed manifest trust data is missing or invalid") from error
     except (OSError, CheckpointValidationError) as error:
         raise ProtocolError("MODEL_UNAVAILABLE", "The selected model checkpoint is unavailable") from error
     except Exception as error:
@@ -121,6 +124,8 @@ def catalog_path(models_dir: Path) -> Path:
 def available_models(models_dir: Path) -> list[dict[str, object]]:
     try:
         catalog = load_catalog(catalog_path(models_dir))
+    except TrustDataError:
+        raise
     except Exception:
         return []
     return [
@@ -134,6 +139,8 @@ def available_devices(models_dir: Path) -> list[str]:
     devices = ["cpu"]
     try:
         catalog = load_catalog(catalog_path(models_dir))
+    except TrustDataError:
+        raise
     except Exception:
         return devices
     if any(item.enabled and "cuda" in variant_devices(item) for item in catalog):
@@ -252,6 +259,8 @@ def enhance(
     models_dir = models_dir or input_path.parent
     try:
         catalog = load_catalog(catalog_path(models_dir))
+    except TrustDataError as error:
+        raise ProtocolError("MODEL_UNAVAILABLE", "The installed reviewed manifest trust data is missing or invalid") from error
     except Exception as error:
         raise ProtocolError("MODEL_UNAVAILABLE", "The model catalog could not be loaded") from error
     variant = next((item for item in catalog if item.id == model_id and item.enabled), None)

@@ -1,0 +1,15 @@
+[
+  {"name":"empty","raw":"{\"schema_version\":1,\"manifests\":{}}","valid":true},
+  {"name":"synthetic","raw":"{\"schema_version\":1,\"manifests\":{\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\":\"test-model\"}}","valid":true},
+  {"name":"malformed-json","raw":"{","valid":false},
+  {"name":"missing-manifests","raw":"{\"schema_version\":1}","valid":false},
+  {"name":"extra-property","raw":"{\"schema_version\":1,\"manifests\":{},\"extra\":1}","valid":false},
+  {"name":"boolean-version","raw":"{\"schema_version\":true,\"manifests\":{}}","valid":false},
+  {"name":"wrong-version","raw":"{\"schema_version\":2,\"manifests\":{}}","valid":false},
+  {"name":"array-manifests","raw":"{\"schema_version\":1,\"manifests\":[]}","valid":false},
+  {"name":"bad-digest","raw":"{\"schema_version\":1,\"manifests\":{\"A\":\"test-model\"}}","valid":false},
+  {"name":"invalid-id","raw":"{\"schema_version\":1,\"manifests\":{\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\":\"Bad_Id\"}}","valid":false},
+  {"name":"non-string-id","raw":"{\"schema_version\":1,\"manifests\":{\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\":1}}","valid":false},
+  {"name":"duplicate-root","raw":"{\"schema_version\":1,\"schema_version\":1,\"manifests\":{}}","valid":false},
+  {"name":"duplicate-digest","raw":"{\"schema_version\":1,\"manifests\":{\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\":\"test-model\",\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\":\"test-model\"}}","valid":false}
+]

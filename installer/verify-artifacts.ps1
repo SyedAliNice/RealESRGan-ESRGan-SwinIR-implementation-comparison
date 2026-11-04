@@ -49,6 +49,7 @@ $required = @(
     @{ Dir = $appDir; File = "DetailFrame.App.exe" },
     @{ Dir = $appDir; File = "shared\models.json" },
     @{ Dir = $appDir; File = "shared\models.schema.json" },
+    @{ Dir = $appDir; File = "shared\reviewed-manifests.json" },
     @{ Dir = $appDir; File = "Assets\Branding\app.ico" },
     @{ Dir = $workerDir; File = "detailframe-worker.exe" },
     @{ Dir = $workerDir; File = "dependency-manifest.txt" }

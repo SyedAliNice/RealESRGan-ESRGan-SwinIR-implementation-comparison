@@ -104,6 +104,15 @@ public sealed class FakeLauncher : IWorkerLauncher
 
 public class WorkerProtocolTests
 {
+    [Fact]
+    public void MissingPythonIsAnActionableFailure()
+    {
+        var path = Path.Combine(PythonTestTools.RepoFile("artifacts"), Guid.NewGuid().ToString("N"), "python.exe");
+        var error = Assert.Throws<InvalidOperationException>(() => PythonTestTools.RequirePython(path));
+        Assert.Contains(path, error.Message);
+        Assert.Contains("worker dev dependencies", error.Message);
+    }
+
     private static readonly WorkerClientOptions FastOptions = new()
     {
         CapabilitiesTimeout = TimeSpan.FromSeconds(2),
@@ -370,11 +379,7 @@ public class WorkerProtocolTests
     [Fact]
     public async Task CancellationTerminatesARealUnresponsiveProcessBeforeReturning()
     {
-        var root = new DirectoryInfo(AppContext.BaseDirectory);
-        while (root is not null && !File.Exists(Path.Combine(root.FullName, "DetailFrame.sln")))
-            root = root.Parent;
-        var python = Path.Combine(root!.FullName, "worker", ".venv", "Scripts", "python.exe");
-        if (!File.Exists(python)) return;
+        var python = PythonTestTools.Python();
         var dir = Path.Combine(Path.GetTempPath(), "df-stuck-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(dir);
         var pidPath = Path.Combine(dir, "pid.txt");
@@ -426,11 +431,9 @@ public class WorkerProtocolTests
         Directory.CreateDirectory(models);
         try
         {
-            var launcher = ProcessWorkerLauncher.Locate(models);
-            if (launcher is null)
-            {
-                return;
-            }
+            var python = PythonTestTools.Python();
+            var launcher = new ProcessWorkerLauncher(python, models, ["-m", "detailframe_worker"],
+                PythonTestTools.RepoFile("worker"));
 
             var caps = await new WorkerProcessClient(launcher, new WorkerClientOptions { CapabilitiesTimeout = TimeSpan.FromSeconds(60) })
                 .GetCapabilitiesAsync(CancellationToken.None);

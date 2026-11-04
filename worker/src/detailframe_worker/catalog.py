@@ -2,6 +2,7 @@ import hashlib
 import ipaddress
 import json
 import re
+import sys
 from dataclasses import dataclass
 from importlib import resources
 from pathlib import Path
@@ -20,8 +21,47 @@ class CheckpointValidationError(ValueError):
     pass
 
 
-# Add a manifest digest only after independently reviewing its exact contents.
-REVIEWED_VALIDATION_MANIFESTS: dict[str, str] = {}
+class TrustDataError(CatalogValidationError):
+    pass
+
+
+def _trust_path() -> Path:
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent.parent / "shared" / "reviewed-manifests.json"
+    return Path(__file__).resolve().parents[3] / "shared" / "reviewed-manifests.json"
+
+
+def _load_reviewed_manifests() -> dict[str, str]:
+    path = _trust_path()
+
+    def unique_object(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError(f"duplicate key: {key}")
+            result[key] = value
+        return result
+
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"), object_pairs_hook=unique_object)
+        if (
+            not isinstance(data, dict)
+            or set(data) != {"schema_version", "manifests"}
+            or type(data["schema_version"]) is not int
+            or data["schema_version"] != 1
+            or not isinstance(data["manifests"], dict)
+        ):
+            raise ValueError("unsupported format")
+        for digest, model_id in data["manifests"].items():
+            if (
+                re.fullmatch(r"[0-9a-f]{64}", digest) is None
+                or not isinstance(model_id, str)
+                or re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", model_id) is None
+            ):
+                raise ValueError("invalid digest or model ID")
+        return data["manifests"]
+    except (OSError, UnicodeError, ValueError) as error:
+        raise TrustDataError(f"invalid or unreadable reviewed manifest trust data: {path}: {error}") from error
 
 
 @dataclass(frozen=True)
@@ -204,12 +244,13 @@ def _read_reviewed_manifest(
     path: Path,
     model_id: str,
     schema: Any,
+    reviewed: dict[str, str],
 ) -> tuple[bytes, dict[str, Any], str]:
     raw, manifest = _read_json_bytes(path, "validation manifest")
     if not isinstance(manifest, dict):
         raise CatalogValidationError("validation manifest must be an object")
     manifest_digest = hashlib.sha256(raw).hexdigest()
-    if REVIEWED_VALIDATION_MANIFESTS.get(manifest_digest) != model_id:
+    if reviewed.get(manifest_digest) != model_id:
         raise CatalogValidationError(
             f"validation manifest for {model_id} has not been independently reviewed"
         )
@@ -229,7 +270,7 @@ def _assert_manifest_matches_variant(variant: ModelVariant) -> None:
     digest = hashlib.sha256(raw).hexdigest()
     if (
         digest != variant.validation_manifest_sha256
-        or REVIEWED_VALIDATION_MANIFESTS.get(digest) != variant.id
+        or _load_reviewed_manifests().get(digest) != variant.id
     ):
         raise CatalogValidationError("model variant does not have a trusted validation manifest")
 
@@ -267,6 +308,7 @@ def _assert_manifest_matches_variant(variant: ModelVariant) -> None:
 
 
 def load_catalog(path: Path) -> tuple[ModelVariant, ...]:
+    reviewed = _load_reviewed_manifests()
     catalog = _read_json(path, "model catalog")
     schema = _read_json(path.with_name("models.schema.json"), "model catalog schema")
     _validate_document(schema, catalog, "model catalog")
@@ -294,6 +336,7 @@ def load_catalog(path: Path) -> tuple[ModelVariant, ...]:
                 manifest_path,
                 entry["id"],
                 manifest_schema,
+                reviewed,
             )
             if any(
                 manifest[manifest_field] != entry[catalog_field]
@@ -391,6 +434,8 @@ def validate_checkpoint(variant: ModelVariant, checkpoint_path: Path) -> None:
         raise CheckpointValidationError("model variant has no expected state-dict specification")
     try:
         _assert_manifest_matches_variant(variant)
+    except TrustDataError:
+        raise
     except (CatalogValidationError, KeyError, TypeError, ValueError) as error:
         raise CheckpointValidationError(
             "model variant does not have a valid reviewed architecture manifest"

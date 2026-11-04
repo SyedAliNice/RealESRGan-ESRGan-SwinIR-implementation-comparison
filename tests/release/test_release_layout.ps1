@@ -76,7 +76,7 @@ function New-Fixture {
     Copy-Item $stub "$app\DetailFrame.App.exe"
     Copy-Item (New-WorkerStub $WorkerStubVersion) "$wk\detailframe-worker.exe"
     Set-Content "$app\System.Runtime.dll" "r"; Set-Content "$app\coreclr.dll" "c"; Set-Content "$app\sub\native.bin" "n"
-    Set-Content "$app\shared\models.json" "{}"; Set-Content "$app\shared\models.schema.json" "{}"
+    Set-Content "$app\shared\models.json" "{}"; Set-Content "$app\shared\models.schema.json" "{}"; Set-Content "$app\shared\reviewed-manifests.json" "{}"
     Set-Content "$app\Assets\Branding\app.ico" "x"
     Set-Content "$wk\dependency-manifest.txt" "numpy==1.0`nattrs==2.0"
 }
@@ -88,6 +88,9 @@ function Invoke-Verify([hashtable]$Extra = @{}) {
 try {
     New-Fixture
     Check "verify passes on complete fixture" (Invoke-Verify)
+    Remove-Item "$fixture\app\win-x64\shared\reviewed-manifests.json"
+    Check "verify fails when trust data is missing" (-not (Invoke-Verify))
+    Set-Content "$fixture\app\win-x64\shared\reviewed-manifests.json" "{}"
     $m1 = Get-Content (Join-Path $fixture "installer\release-manifest.json") -Raw
     Invoke-Verify | Out-Null
     $m2 = Get-Content (Join-Path $fixture "installer\release-manifest.json") -Raw

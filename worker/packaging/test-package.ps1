@@ -1,7 +1,10 @@
+param([string]$Dist)
+
 $ErrorActionPreference = "Stop"
 
 $repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
-$dist = Join-Path $repoRoot "artifacts\worker\win-x64"
+if (-not $Dist) { $Dist = Join-Path $repoRoot "artifacts\worker\win-x64" }
+$dist = [IO.Path]::GetFullPath($Dist)
 $exe = Join-Path $dist "detailframe-worker.exe"
 $initFile = Join-Path $PSScriptRoot "..\src\detailframe_worker\__init__.py"
 $expectedVersion = (Select-String -Path $initFile -Pattern '__version__ = "([^"]+)"').Matches[0].Groups[1].Value
@@ -39,12 +42,27 @@ Assert-That ($process.ExitCode -eq 0) "--version exited with $($process.ExitCode
 Assert-That ($versionOutput -eq "detailframe-worker $expectedVersion") "unexpected --version output: '$versionOutput'"
 
 $modelsDir = Join-Path $env:TEMP ("detailframe-pkg-test-" + [guid]::NewGuid())
+$trustDir = Join-Path (Split-Path -Parent $dist) "shared"
+if (Test-Path -LiteralPath $trustDir) { throw "Refusing to overwrite existing package-test trust directory: $trustDir" }
+$createdTrustDir = $false
 New-Item -ItemType Directory $modelsDir | Out-Null
 try {
     Copy-Item (Join-Path $repoRoot "shared\models.json") (Join-Path $modelsDir "models.json")
-    $process = New-WorkerProcess "--protocol-stdio --models-dir `"$modelsDir`""
+    Copy-Item (Join-Path $repoRoot "shared\models.schema.json") (Join-Path $modelsDir "models.schema.json")
     $requestId = [guid]::NewGuid().ToString()
     $request = @{ protocol_version = 1; type = "capabilities"; request_id = $requestId } | ConvertTo-Json -Compress
+    $process = New-WorkerProcess "--protocol-stdio --models-dir `"$modelsDir`""
+    $process.StandardInput.WriteLine($request)
+    $process.StandardInput.Close()
+    $stderrTask = $process.StandardError.ReadToEndAsync()
+    $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+    if (-not $process.WaitForExit(120000)) { $process.Kill(); $process.WaitForExit(); throw "FAIL: worker did not exit" }
+    Assert-That ($process.ExitCode -ne 0 -and $stderrTask.Result -match "trust data") "worker did not reject missing installed trust data"
+
+    New-Item -ItemType Directory $trustDir | Out-Null
+    $createdTrustDir = $true
+    Copy-Item (Join-Path $repoRoot "shared\reviewed-manifests.json") (Join-Path $trustDir "reviewed-manifests.json")
+    $process = New-WorkerProcess "--protocol-stdio --models-dir `"$modelsDir`""
     $process.StandardInput.WriteLine($request)
     $process.StandardInput.Close()
     $stderrTask = $process.StandardError.ReadToEndAsync()
@@ -66,6 +84,7 @@ try {
 }
 finally {
     Remove-Item -Recurse -Force $modelsDir -ErrorAction SilentlyContinue
+    if ($createdTrustDir) { Remove-Item -Recurse -Force $trustDir -ErrorAction SilentlyContinue }
 }
 
 "PASS: packaged worker $expectedVersion responds to --version and capabilities"

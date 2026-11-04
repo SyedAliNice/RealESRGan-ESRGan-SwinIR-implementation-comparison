@@ -2,7 +2,6 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
-using System.Diagnostics;
 using System.Net;
 using DetailFrame.App.Models;
 using DetailFrame.App.Services;
@@ -73,13 +72,7 @@ public sealed class ModelCatalogServiceTests : IDisposable
 
     private static string RepoFile(string relative)
     {
-        var dir = new DirectoryInfo(AppContext.BaseDirectory);
-        while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "DetailFrame.sln")))
-        {
-            dir = dir.Parent;
-        }
-
-        return Path.Combine(dir!.FullName, relative);
+        return PythonTestTools.RepoFile(relative);
     }
 
         private sealed class FixtureHandler(byte[] payload) : HttpMessageHandler
@@ -91,24 +84,25 @@ public sealed class ModelCatalogServiceTests : IDisposable
         [Fact]
         public async Task AppDownloadAndWorkerConsumeSameReviewedFixture()
         {
-            var python = RepoFile(@"worker\.venv\Scripts\python.exe");
-            if (!File.Exists(python)) return;
+            var python = PythonTestTools.Python();
             var checkpoint = Path.Combine(_dir, "source.bin");
-            var create = new ProcessStartInfo(python) { UseShellExecute = false, CreateNoWindow = true };
-            create.ArgumentList.Add("-c");
-            create.ArgumentList.Add("import sys,torch;torch.save({'conv.weight':torch.ones((64,3,3,3))},sys.argv[1])");
-            create.ArgumentList.Add(checkpoint);
-            using (var process = Process.Start(create)!)
-            {
-                await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(60));
-                Assert.Equal(0, process.ExitCode);
-            }
+            var create = await PythonTestTools.RunAsync("-c",
+                "import sys,torch;torch.save({'conv.weight':torch.ones((64,3,3,3))},sys.argv[1])", checkpoint);
+            Assert.True(create.ExitCode == 0, "Install the worker dev dependencies. " + create.Error);
 
             var payload = await File.ReadAllBytesAsync(checkpoint);
             var sha = Convert.ToHexString(SHA256.HashData(payload)).ToLowerInvariant();
             var manifest = Manifest(sha: sha);
             var catalogText = Catalog(Entry(sha: sha));
-            var variant = Assert.Single(Parse(catalogText, manifest));
+            await File.WriteAllTextAsync(Path.Combine(_dir, "m.json"), manifest);
+            var digest = Hex(manifest);
+            var trustPath = Path.Combine(_dir, "reviewed-manifests.json");
+            await File.WriteAllTextAsync(trustPath, JsonSerializer.Serialize(new
+            {
+                schema_version = 1, manifests = new Dictionary<string, string> { [digest] = "test-model" }
+            }));
+            var reviewed = ValidationManifestVerifier.LoadReviewedManifests(trustPath);
+            var variant = Assert.Single(ModelCatalogService.Parse(catalogText, _dir, reviewed));
             var catalogPath = Path.Combine(_dir, "models.json");
             await File.WriteAllTextAsync(catalogPath, catalogText);
             File.Copy(RepoFile(@"shared\models.schema.json"), Path.Combine(_dir, "models.schema.json"));
@@ -118,21 +112,20 @@ public sealed class ModelCatalogServiceTests : IDisposable
             Assert.Equal(Path.Combine(cache, sha, variant.WeightFile), installed.Path);
             Assert.True(File.Exists(installed.Path), installed.Path);
 
-            var digest = Hex(manifest);
             var script = """
                 import os,sys
                 from pathlib import Path
                 from detailframe_worker import catalog,engine
                 from detailframe_worker.worker import run_worker
                 os.environ['DETAILFRAME_CATALOG_PATH'] = sys.argv[1]
-                catalog.REVIEWED_VALIDATION_MANIFESTS[sys.argv[2]] = 'test-model'
+                catalog._trust_path = lambda: Path(sys.argv[2])
                 engine.ADAPTERS['rrdb'] = engine.ModelAdapter(lambda *args: None)
                 cache = Path('\\\\?\\' + sys.argv[3])
                 variant, = catalog.load_catalog(Path(sys.argv[1]))
                 assert tuple(engine._load_state_dict(variant, cache)['conv.weight'].shape) == (64,3,3,3)
                 raise SystemExit(run_worker(sys.stdin,sys.stdout,sys.stderr,cache))
                 """;
-            var launcher = new ProcessWorkerLauncher(python, cache, ["-c", script, catalogPath, digest, cache],
+            var launcher = new ProcessWorkerLauncher(python, cache, ["-c", script, catalogPath, trustPath, cache],
                 Path.GetDirectoryName(RepoFile(@"worker\pyproject.toml")));
             WorkerCapabilities caps;
             try
@@ -155,89 +148,43 @@ public sealed class ModelCatalogServiceTests : IDisposable
     [Fact]
     public async Task CatalogAcceptanceAgreesWithSharedSchemaForRepresentativeCases()
     {
-        var python = RepoFile(@"worker\.venv\Scripts\python.exe");
-        if (!File.Exists(python)) return;
-        var entry = Entry();
-        var documents = new[]
-        {
-            Catalog(entry),
-            Catalog(entry.Replace("\"id\":\"test-model\"", "\"id\":\"Bad_Id\"")),
-            Catalog(entry.Replace("\"scale\":4", "\"scale\":1")),
-            Catalog(entry.Replace("\"weight_file\":\"w.bin\"", "\"weight_file\":\"CON.pth\"")),
-            Catalog(entry.Replace("\"weight_url\":\"https://example.test/w.bin\"", "\"weight_url\":\"https://example.test/\"")),
-            Catalog(entry.Replace("\"devices\":[\"cpu\"]", "\"devices\":[\"cuda\"]")),
-            Catalog(entry.Replace("\"sha256\":\"" + Sha + "\"", "\"sha256\":\"bad\"")),
-            Catalog(entry.Replace("\"enabled\":true", "\"enabled\":true,\"unknown\":1")),
-            Catalog(entry.Replace("\"validation_manifest\":\"m.json\",", "")),
-        };
-        var start = new ProcessStartInfo(python)
-        {
-            UseShellExecute = false, CreateNoWindow = true,
-            RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true,
-            WorkingDirectory = Path.GetDirectoryName(RepoFile(@"worker\pyproject.toml"))!
-        };
-        start.ArgumentList.Add("-c");
-        start.ArgumentList.Add("""
+        var fixturePath = RepoFile(@"tests\fixtures\catalog-parity.json");
+        using var fixture = JsonDocument.Parse(await File.ReadAllTextAsync(fixturePath));
+        var cases = fixture.RootElement.GetProperty("documents").EnumerateArray().ToArray();
+        var result = await PythonTestTools.RunAsync("-c", """
             import json,sys
             from jsonschema import Draft202012Validator
             from detailframe_worker.catalog import _format_checker
             schema = json.load(open(sys.argv[1], encoding='utf-8'))
+            fixture = json.load(open(sys.argv[2], encoding='utf-8'))
             v = Draft202012Validator(schema, format_checker=_format_checker())
-            print(json.dumps([v.is_valid(json.loads(d)) for d in json.load(sys.stdin)]))
-            """);
-        start.ArgumentList.Add(RepoFile(@"shared\models.schema.json"));
-        using var process = Process.Start(start)!;
-        await process.StandardInput.WriteAsync(JsonSerializer.Serialize(documents));
-        process.StandardInput.Close();
-        var output = await process.StandardOutput.ReadToEndAsync();
-        var error = await process.StandardError.ReadToEndAsync();
-        await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(60));
-        Assert.True(process.ExitCode == 0, error);
-        var schemaAccepts = JsonSerializer.Deserialize<bool[]>(output)!;
-        Assert.Equal(documents.Select(document => Parse(document, Manifest()).Count == 1), schemaAccepts);
-        Assert.True(schemaAccepts[0]);
-        Assert.All(schemaAccepts.Skip(1), accepted => Assert.False(accepted));
+            print(json.dumps([v.is_valid(case['document']) for case in fixture['documents']]))
+            """, RepoFile(@"shared\models.schema.json"), fixturePath);
+        Assert.True(result.ExitCode == 0, "Install the worker dev dependencies. " + result.Error);
+        var schemaAccepts = JsonSerializer.Deserialize<bool[]>(result.Output)!;
+        Assert.Equal(cases.Length, schemaAccepts.Length);
+        for (var i = 0; i < cases.Length; i++)
+        {
+            var item = cases[i];
+            var expected = item.GetProperty("valid").GetBoolean();
+            var name = item.GetProperty("name").GetString();
+            Assert.True(expected == schemaAccepts[i], $"Schema case: {name}");
+            bool accepted;
+            try { accepted = Parse(item.GetProperty("document").GetRawText(), Manifest()).Count == 1; }
+            catch (CatalogException) { accepted = false; }
+            Assert.True(expected == accepted, $"C# case: {name}");
+        }
     }
 
     [Fact]
-    public async Task UrlValidationMatchesWorkerAcrossHostAndPathCases()
+    public void UrlValidationMatchesSharedRegressionCases()
     {
-        var python = RepoFile(@"worker\.venv\Scripts\python.exe");
-        if (!File.Exists(python)) return;
-        var urls = new[]
+        using var fixture = JsonDocument.Parse(File.ReadAllText(RepoFile(@"tests\fixtures\catalog-parity.json")));
+        foreach (var item in fixture.RootElement.GetProperty("urls").EnumerateArray())
         {
-            "https://", "https:///missing-host", "https://user@models.example.com/file",
-            "https://models.example.com:bad/file", "https://models.example.com:99999/file",
-            "https://models.example.com", "https://models.example.com/",
-            "https://models.example.com\\evil/file", "https://models example.com/file",
-            "https://-models.example.com/file", "https://models-.example.com/file",
-            "https://models..example.com/file", "https://models_example.com/file",
-            "https://[::1/file", "https://[not-an-ip]/file", "https://::1/file",
-            "https://999.999.1.1/file", "https://models.example.com:/file",
-            "https://models.example.com:0/file", "https://models.example.com:65536/file",
-            "HTTPS://models.example.com:8443/file?token=example#download",
-            "https://xn--bcher-kva.example/file", "https://bücher.example/file",
-            "https://192.0.2.1/file", "https://[2001:db8::1]:443/file",
-            "https://example.com/a\\b", "https://example.com/.", "https://example.com/a/../",
-        };
-        var start = new ProcessStartInfo(python)
-        {
-            UseShellExecute = false, CreateNoWindow = true,
-            RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true,
-            WorkingDirectory = Path.GetDirectoryName(RepoFile(@"worker\pyproject.toml"))!
-        };
-        start.ArgumentList.Add("-c");
-        start.ArgumentList.Add("import json,sys;from detailframe_worker.catalog import _is_https_url;print(json.dumps([_is_https_url(u) for u in json.load(sys.stdin)]))");
-        using var process = Process.Start(start)!;
-        await process.StandardInput.WriteAsync(JsonSerializer.Serialize(urls));
-        process.StandardInput.Close();
-        var output = await process.StandardOutput.ReadToEndAsync();
-        var error = await process.StandardError.ReadToEndAsync();
-        await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(60));
-        Assert.True(process.ExitCode == 0, error);
-        var worker = JsonSerializer.Deserialize<bool[]>(output)!;
-        for (var i = 0; i < urls.Length; i++)
-            Assert.True(worker[i] == ModelCatalogService.IsHttpsUrl(urls[i]), urls[i]);
+            var value = item.GetProperty("value").GetString()!;
+            Assert.True(item.GetProperty("valid").GetBoolean() == ModelCatalogService.IsHttpsUrl(value), value);
+        }
     }
 
     [Fact]
@@ -269,13 +216,49 @@ public sealed class ModelCatalogServiceTests : IDisposable
     {
         Assert.Empty(Parse(Catalog(Entry()), Manifest(), reviewedId: null));
         Assert.Empty(Parse(Catalog(Entry()), Manifest(), reviewedId: "other-model"));
-        Assert.Empty(ModelCatalogService.Parse(Catalog(Entry()), _dir));
+        Assert.Empty(ModelCatalogService.Parse(Catalog(Entry()), _dir,
+            ValidationManifestVerifier.LoadReviewedManifests(RepoFile(@"shared\reviewed-manifests.json"))));
     }
 
     [Fact]
     public void Shipped_allowlist_is_empty()
     {
-        Assert.Empty(ValidationManifestVerifier.ReviewedManifests);
+        Assert.Empty(ValidationManifestVerifier.LoadReviewedManifests(RepoFile(@"shared\reviewed-manifests.json")));
+        Assert.Empty(ValidationManifestVerifier.LoadReviewedManifests(ValidationManifestVerifier.DefaultTrustPath));
+    }
+
+    [Fact]
+    public void CatalogDirectoryCannotSupplyItsOwnTrust()
+    {
+        var manifest = Manifest();
+        File.WriteAllText(Path.Combine(_dir, "m.json"), manifest);
+        File.WriteAllText(Path.Combine(_dir, "reviewed-manifests.json"), JsonSerializer.Serialize(new
+        {
+            schema_version = 1, manifests = new Dictionary<string, string> { [Hex(manifest)] = "test-model" }
+        }));
+        Assert.Empty(ModelCatalogService.Parse(Catalog(Entry()), _dir));
+    }
+
+    [Fact]
+    public void TrustDataUsesStrictSharedContract()
+    {
+        using var fixture = JsonDocument.Parse(File.ReadAllText(RepoFile(@"tests\fixtures\trust-data-cases.json")));
+        var path = Path.Combine(_dir, "trust.json");
+        foreach (var item in fixture.RootElement.EnumerateArray())
+        {
+            File.WriteAllText(path, item.GetProperty("raw").GetString()!);
+            var name = item.GetProperty("name").GetString();
+            if (item.GetProperty("valid").GetBoolean())
+            {
+                var data = ValidationManifestVerifier.LoadReviewedManifests(path);
+                if (name == "synthetic") Assert.Equal("test-model", data[new string('a', 64)]);
+            }
+            else
+                Assert.Throws<CatalogException>(() => ValidationManifestVerifier.LoadReviewedManifests(path));
+        }
+        File.Delete(path);
+        Assert.Contains("trust data", Assert.Throws<CatalogException>(() =>
+            ValidationManifestVerifier.LoadReviewedManifests(path)).Message);
     }
 
     [Theory]
@@ -385,13 +368,13 @@ public sealed class ModelCatalogServiceTests : IDisposable
     [InlineData("[]")]
     public void Malformed_catalog_throws(string text)
     {
-        Assert.Throws<CatalogException>(() => ModelCatalogService.Parse(text, _dir));
+        Assert.Throws<CatalogException>(() => ModelCatalogService.Parse(text, _dir, new Dictionary<string, string>()));
     }
 
     [Fact]
     public async Task Shipped_catalog_is_empty_and_loads()
     {
-        var service = new ModelCatalogService(RepoFile("shared/models.json"));
+        var service = new ModelCatalogService(RepoFile(@"shared\models.json"));
         Assert.Empty(await service.LoadEnabledModelsAsync());
     }
 
@@ -405,7 +388,7 @@ public sealed class ModelCatalogServiceTests : IDisposable
     [Fact]
     public void Code_patterns_match_schema_and_dotnet_handles_inline_case_groups()
     {
-        using var schema = JsonDocument.Parse(File.ReadAllText(RepoFile("shared/models.schema.json")));
+        using var schema = JsonDocument.Parse(File.ReadAllText(RepoFile(@"shared\models.schema.json")));
         var defs = schema.RootElement.GetProperty("$defs");
         var model = defs.GetProperty("model").GetProperty("properties");
         string P(JsonElement e) => e.GetProperty("pattern").GetString()!;

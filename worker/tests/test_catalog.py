@@ -1,10 +1,10 @@
 import hashlib
 import json
-import re
 import shutil
 from pathlib import Path
 
 import pytest
+from jsonschema import Draft202012Validator
 
 import detailframe_worker.catalog as catalog_module
 from detailframe_worker.catalog import CatalogValidationError, load_catalog
@@ -92,14 +92,76 @@ def test_loads_empty_version_one_catalog():
     assert load_catalog(SHARED_ROOT / "models.json") == ()
 
 
-def test_production_worker_and_app_trust_lists_remain_empty_together():
-    app = (REPOSITORY_ROOT / "src" / "DetailFrame.App" / "Services" /
-           "ValidationManifestVerifier.cs").read_text(encoding="utf-8")
-    assert catalog_module.REVIEWED_VALIDATION_MANIFESTS == {}
-    assert re.search(
-        r"ReviewedManifests\s*\{\s*get;\s*\}\s*=\s*new Dictionary<string, string>\(\)\s*;",
-        app,
+def test_production_trust_data_is_empty():
+    assert catalog_module._load_reviewed_manifests() == {}
+
+
+def test_shared_trust_data_contract_and_missing_file(tmp_path, monkeypatch):
+    cases = json.loads((REPOSITORY_ROOT / "tests" / "fixtures" / "trust-data-cases.json").read_text(encoding="utf-8"))
+    path = tmp_path / "trust.json"
+    monkeypatch.setattr(catalog_module, "_trust_path", lambda: path)
+    for case in cases:
+        path.write_text(case["raw"], encoding="utf-8")
+        if case["valid"]:
+            data = catalog_module._load_reviewed_manifests()
+            if case["name"] == "synthetic":
+                assert data["a" * 64] == "test-model"
+        else:
+            with pytest.raises(catalog_module.TrustDataError, match="trust data"):
+                catalog_module._load_reviewed_manifests()
+    path.unlink()
+    with pytest.raises(catalog_module.TrustDataError, match="trust data"):
+        load_catalog(SHARED_ROOT / "models.json")
+
+
+def test_catalog_cache_does_not_supply_trust_data(tmp_path):
+    entry = valid_entry()
+    path = write_catalog(tmp_path, [entry])
+    digest = hashlib.sha256((tmp_path / entry["validation_manifest"]).read_bytes()).hexdigest()
+    (tmp_path / "reviewed-manifests.json").write_text(
+        json.dumps({"schema_version": 1, "manifests": {digest: entry["id"]}}),
+        encoding="utf-8",
     )
+    assert catalog_module._trust_path() != tmp_path / "reviewed-manifests.json"
+    assert catalog_module._load_reviewed_manifests() == {}
+    with pytest.raises(CatalogValidationError, match="not been independently reviewed"):
+        load_catalog(path)
+
+
+def test_frozen_worker_uses_shared_sibling_of_installed_worker(tmp_path, monkeypatch):
+    worker = tmp_path / "install" / "worker" / "detailframe-worker.exe"
+    expected = tmp_path / "install" / "shared" / "reviewed-manifests.json"
+    monkeypatch.setattr(catalog_module.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(catalog_module.sys, "executable", str(worker))
+    assert catalog_module._trust_path() == expected
+
+
+def test_missing_trust_data_is_explicit_in_worker_operations(tmp_path, monkeypatch):
+    from detailframe_worker import engine
+    from detailframe_worker.protocol import ProtocolError
+
+    monkeypatch.setattr(catalog_module, "_trust_path", lambda: tmp_path / "missing.json")
+    with pytest.raises(catalog_module.TrustDataError, match="trust data"):
+        engine.available_models(tmp_path)
+    with pytest.raises(catalog_module.TrustDataError, match="trust data"):
+        engine.available_devices(tmp_path)
+    with pytest.raises(ProtocolError, match="trust data"):
+        engine.enhance("test", 2, "cpu", tmp_path / "in.png", tmp_path / "out.png",
+                       "png", lambda *_: None, lambda: False, models_dir=tmp_path)
+
+
+def test_shared_url_and_schema_regression_cases():
+    fixture = json.loads((REPOSITORY_ROOT / "tests" / "fixtures" / "catalog-parity.json").read_text(encoding="utf-8"))
+    schema = json.loads((SHARED_ROOT / "models.schema.json").read_text(encoding="utf-8"))
+    validator = Draft202012Validator(schema, format_checker=catalog_module._format_checker())
+    for case in fixture["urls"]:
+        assert catalog_module._is_https_url(case["value"]) == case["valid"], case["value"]
+    for case in fixture["documents"]:
+        assert validator.is_valid(case["document"]) == case["valid"], case["name"]
+
+
+def trust_for_test(monkeypatch, digest, model_id):
+    monkeypatch.setattr(catalog_module, "_load_reviewed_manifests", lambda: {digest: model_id})
 
 
 def test_loads_empty_catalog_without_adjacent_manifest_schema(tmp_path):
@@ -114,7 +176,7 @@ def test_loads_catalog_variant_only_with_test_trusted_manifest(tmp_path, monkeyp
     entry = valid_entry()
     path = write_catalog(tmp_path, [entry])
     digest = hashlib.sha256((tmp_path / entry["validation_manifest"]).read_bytes()).hexdigest()
-    monkeypatch.setitem(catalog_module.REVIEWED_VALIDATION_MANIFESTS, digest, entry["id"])
+    trust_for_test(monkeypatch, digest, entry["id"])
 
     variant, = load_catalog(path)
 
@@ -157,7 +219,7 @@ def test_rejects_reviewed_manifest_url_without_host_or_with_credentials(
     manifest["weight_url"] = url
     manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
     digest = hashlib.sha256(manifest_path.read_bytes()).hexdigest()
-    monkeypatch.setitem(catalog_module.REVIEWED_VALIDATION_MANIFESTS, digest, entry["id"])
+    trust_for_test(monkeypatch, digest, entry["id"])
 
     with pytest.raises(CatalogValidationError):
         load_catalog(path)
@@ -306,7 +368,7 @@ def test_rejects_catalog_architecture_different_from_reviewed_manifest(tmp_path,
     entry = valid_entry()
     path = write_catalog(tmp_path, [entry])
     digest = hashlib.sha256((tmp_path / entry["validation_manifest"]).read_bytes()).hexdigest()
-    monkeypatch.setitem(catalog_module.REVIEWED_VALIDATION_MANIFESTS, digest, entry["id"])
+    trust_for_test(monkeypatch, digest, entry["id"])
     entry["architecture"] = "different_architecture"
     path.write_text(
         json.dumps({"schema_version": 1, "models": [entry]}),
@@ -325,7 +387,7 @@ def test_rejects_manifest_with_wrong_architecture_config_digest(tmp_path, monkey
     manifest["architecture_config"]["num_features"] = 128
     manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
     digest = hashlib.sha256(manifest_path.read_bytes()).hexdigest()
-    monkeypatch.setitem(catalog_module.REVIEWED_VALIDATION_MANIFESTS, digest, entry["id"])
+    trust_for_test(monkeypatch, digest, entry["id"])
 
     with pytest.raises(CatalogValidationError, match="architecture/configuration digest"):
         load_catalog(path)

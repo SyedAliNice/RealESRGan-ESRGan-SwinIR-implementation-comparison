@@ -31,13 +31,13 @@ public sealed class ModelCatalogService
         [.. RequiredKeys, "size_bytes", "validation_manifest"];
 
     private readonly string _catalogPath;
-    private readonly IReadOnlyDictionary<string, string> _reviewedManifests;
+    private readonly IReadOnlyDictionary<string, string>? _reviewedManifests;
 
     public ModelCatalogService(
         string catalogPath, IReadOnlyDictionary<string, string>? reviewedManifests = null)
     {
         _catalogPath = catalogPath;
-        _reviewedManifests = reviewedManifests ?? ValidationManifestVerifier.ReviewedManifests;
+        _reviewedManifests = reviewedManifests;
     }
 
     public static string DefaultCatalogPath =>
@@ -61,6 +61,8 @@ public sealed class ModelCatalogService
     public static IReadOnlyList<ModelVariant> Parse(
         string json, string catalogDirectory, IReadOnlyDictionary<string, string>? reviewedManifests = null)
     {
+        var reviewed = reviewedManifests
+            ?? ValidationManifestVerifier.LoadReviewedManifests(ValidationManifestVerifier.DefaultTrustPath);
         try
         {
             using var document = JsonDocument.Parse(json);
@@ -87,8 +89,7 @@ public sealed class ModelCatalogService
                 {
                     throw new CatalogException("The model catalog contains duplicate model IDs.");
                 }
-                var variant = TryReadEntry(entry, catalogDirectory,
-                    reviewedManifests ?? ValidationManifestVerifier.ReviewedManifests, out var valid);
+                var variant = TryReadEntry(entry, catalogDirectory, reviewed, out var valid);
                 if (!valid || (variant is null && entry.GetProperty("enabled").ValueKind == JsonValueKind.True))
                 {
                     return [];
