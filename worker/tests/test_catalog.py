@@ -136,6 +136,18 @@ def test_frozen_worker_uses_shared_sibling_of_installed_worker(tmp_path, monkeyp
     assert catalog_module._trust_path() == expected
 
 
+def test_frozen_artifact_worker_prefers_catalog_env_shared_sibling(tmp_path, monkeypatch):
+    worker = tmp_path / "artifacts" / "worker" / "win-x64" / "detailframe-worker.exe"
+    catalog = tmp_path / "app-output" / "shared" / "models.json"
+    expected = catalog.with_name("reviewed-manifests.json")
+    wrong_from_worker = tmp_path / "artifacts" / "worker" / "shared" / "reviewed-manifests.json"
+    monkeypatch.setattr(catalog_module.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(catalog_module.sys, "executable", str(worker))
+    monkeypatch.setenv("DETAILFRAME_CATALOG_PATH", str(catalog))
+    assert catalog_module._trust_path() == expected
+    assert catalog_module._trust_path() != wrong_from_worker
+
+
 def test_missing_trust_data_is_explicit_in_worker_operations(tmp_path, monkeypatch):
     from detailframe_worker import engine
     from detailframe_worker.protocol import ProtocolError

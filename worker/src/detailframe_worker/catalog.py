@@ -1,6 +1,7 @@
 import hashlib
 import ipaddress
 import json
+import os
 import re
 import sys
 from dataclasses import dataclass
@@ -26,6 +27,11 @@ class TrustDataError(CatalogValidationError):
 
 
 def _trust_path() -> Path:
+    catalog_path = os.environ.get("DETAILFRAME_CATALOG_PATH")
+    if catalog_path:
+        catalog = Path(catalog_path).resolve()
+        if catalog.name == "models.json" and catalog.parent.name.lower() == "shared":
+            return catalog.with_name("reviewed-manifests.json")
     if getattr(sys, "frozen", False):
         return Path(sys.executable).resolve().parent.parent / "shared" / "reviewed-manifests.json"
     return Path(__file__).resolve().parents[3] / "shared" / "reviewed-manifests.json"
