@@ -1,0 +1,61 @@
+<UserControl
+    x:Class="DetailFrame.App.Views.ConfigurePage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <ScrollViewer>
+        <StackPanel Padding="32" Spacing="16" MaxWidth="640" HorizontalAlignment="Left">
+            <TextBlock Style="{StaticResource TitleTextBlockStyle}"
+                       Text="Configure"
+                       AutomationProperties.HeadingLevel="Level1" />
+
+            <InfoBar x:Name="StatusBar"
+                     Severity="Informational"
+                     IsClosable="False"
+                     IsOpen="False" />
+
+            <StackPanel x:Name="EmptyPanel" Spacing="8" Visibility="Collapsed">
+                <TextBlock Style="{StaticResource SubtitleTextBlockStyle}"
+                           Text="No models available yet" />
+                <TextBlock TextWrapping="Wrap"
+                           Text="No enhancement model has been verified for this release, so Enhance stays disabled. Check for an update later." />
+            </StackPanel>
+
+            <StackPanel x:Name="OptionsPanel" Spacing="12" Visibility="Collapsed">
+                <ComboBox x:Name="ModelBox"
+                          Header="Model"
+                          MinWidth="280"
+                          DisplayMemberPath="DisplayName"
+                          SelectionChanged="ModelBox_SelectionChanged"
+                          AutomationProperties.Name="Model" />
+                <ComboBox x:Name="ScaleBox"
+                          Header="Scale"
+                          MinWidth="280"
+                          SelectionChanged="ScaleBox_SelectionChanged"
+                          AutomationProperties.Name="Scale" />
+                <ComboBox x:Name="DeviceBox"
+                          Header="Device"
+                          MinWidth="280"
+                          SelectionChanged="DeviceBox_SelectionChanged"
+                          AutomationProperties.Name="Processing device" />
+                <TextBlock x:Name="DeviceNote" TextWrapping="Wrap" Opacity="0.8" />
+
+                <TextBlock x:Name="ModelStatus" TextWrapping="Wrap" />
+                <ProgressBar x:Name="DownloadProgressBar"
+                             Visibility="Collapsed"
+                             Minimum="0"
+                             Maximum="1"
+                             AutomationProperties.Name="Download progress" />
+                <StackPanel Orientation="Horizontal" Spacing="12">
+                    <Button x:Name="DownloadButton"
+                            Content="Download model"
+                            Style="{StaticResource AccentButtonStyle}"
+                            Click="DownloadButton_Click" />
+                    <Button x:Name="CancelButton"
+                            Content="Cancel"
+                            Visibility="Collapsed"
+                            Click="CancelButton_Click" />
+                </StackPanel>
+            </StackPanel>
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

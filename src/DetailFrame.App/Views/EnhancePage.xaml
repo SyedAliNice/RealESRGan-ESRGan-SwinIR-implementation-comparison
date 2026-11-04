@@ -1,0 +1,39 @@
+<UserControl
+    x:Class="DetailFrame.App.Views.EnhancePage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <ScrollViewer>
+        <StackPanel Padding="32" Spacing="16" MaxWidth="640" HorizontalAlignment="Left">
+            <TextBlock Style="{StaticResource TitleTextBlockStyle}"
+                       Text="Enhance"
+                       AutomationProperties.HeadingLevel="Level1" />
+
+            <InfoBar x:Name="StatusBar"
+                     Severity="Informational"
+                     IsClosable="False"
+                     IsOpen="False" />
+
+            <TextBlock x:Name="Summary" TextWrapping="Wrap" />
+
+            <StackPanel x:Name="ProgressPanel" Spacing="8" Visibility="Collapsed">
+                <TextBlock x:Name="StageText" AutomationProperties.LiveSetting="Polite" />
+                <ProgressBar x:Name="JobProgress"
+                             Minimum="0"
+                             Maximum="1"
+                             IsIndeterminate="True"
+                             AutomationProperties.Name="Enhancement progress" />
+            </StackPanel>
+
+            <StackPanel Orientation="Horizontal" Spacing="12">
+                <Button x:Name="StartButton"
+                        Content="Start enhancement"
+                        Style="{StaticResource AccentButtonStyle}"
+                        Click="StartButton_Click" />
+                <Button x:Name="CancelButton"
+                        Content="Cancel"
+                        Visibility="Collapsed"
+                        Click="CancelButton_Click" />
+            </StackPanel>
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

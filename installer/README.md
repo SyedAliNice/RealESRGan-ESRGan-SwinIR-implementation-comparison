@@ -1,0 +1,78 @@
+# DetailFrame installer and release layout
+
+## Staging layout (all generated, git-ignored under `artifacts/`)
+
+| Path | Producer |
+|---|---|
+| `artifacts/app/win-x64/` | `dotnet publish` of `src/DetailFrame.App` (unpackaged, x64, self-contained) |
+| `artifacts/worker/win-x64/` | `worker/packaging/build.ps1` (PyInstaller) |
+| `artifacts/installer/DetailFrame-Setup.exe` | installer compiler (a later task) |
+| `artifacts/installer/release-manifest.json` | `installer/verify-artifacts.ps1` |
+
+Installer inputs are limited to the two artifact directories plus versioned files in `installer/` and `src/DetailFrame.App/Assets/Branding`. Build outputs are never committed.
+
+## Scripts
+
+- `pwsh installer/build.ps1 [-SkipWorker] [-SkipApp]` builds the worker and app, then verifies.
+- `pwsh installer/verify-artifacts.ps1 [-RequireInstaller]` fails if an input is missing, a binary is not x64, the staging roots, their parents or any file is a reparse point, a payload file is hardlinked, a path resolves outside the staging directory, the built `detailframe-worker.exe --version` disagrees with `worker/pyproject.toml` or times out, or the artifact root is outside `<repo>/artifacts`. It writes a deterministic (timestamp-free) manifest with app version, worker version, architecture, worker package inventory, a comprehensive app runtime inventory (every published file that is not app-owned, with version and SHA-256) and a SHA-256 plus `app`/`runtime`/`worker` role for every file. The worker version is read from the built executable.
+- `pwsh tests/release/test_release_layout.ps1` checks the layout rules and verifier behaviour against fixtures.
+
+## Installer tool decision: Inno Setup 6
+
+Evidence gathered 2026-10-20:
+
+- Available: `winget search "Inno Setup"` lists `JRSoftware.InnoSetup` 6.7.3 and `JRSoftware.InnoSetup.7` 7.1.0; jrsoftware.org/isdl.php lists 6.x and 7.x downloads and source.
+- Maintenance: active; 6.6 and 6.7 shipped dark mode, custom wizard images and RedirectionGuard support.
+- License: free to use and distribute installers; the vendor asks commercial users to purchase a license (isorder.php). Review before commercial release.
+- Fit: a single `.iss` script compiled by `ISCC.exe` produces a per-machine, administrator-required `DetailFrame-Setup.exe` from plain directories, which suits an unpackaged app plus a PyInstaller folder. Comparisons with WiX and NSIS were not researched or verified and are not part of the justification for this choice.
+
+Inno Setup 6 is the stable line; 7.x is acceptable if the later installer task prefers it. The compiler is not required for Task 1.
+
+## Installer script and prerequisites (Task 3)
+
+Files: `installer/DetailFrame.iss` (Inno Setup script), `installer/prerequisites.ps1` (prerequisite logic), `tests/release/test_installer_prerequisites.ps1`.
+
+**RELEASE GATE: `DetailFrame.iss` has NOT been compiled yet, and no Inno Setup version has been tested.** ISCC is not installed on the authoring machine, so only static checks have run. The script uses features from Inno Setup 6.3+ (`x64compatible`); before any release, compile it with ISCC (6.7.3 or 7.x are candidates only, not verified), fix compiler findings, and record the version that actually compiled it here.
+
+Build tools: .NET SDK (see `build-app.ps1`), the worker build tools (`worker/packaging/build.ps1`), PowerShell 7, Inno Setup 6.3+.
+
+Compile (after `installer/build.ps1` has staged artifacts and the runtime bootstrapper has been fetched):
+
+```powershell
+pwsh installer/prerequisites.ps1 -Mode Download -DestinationDir artifacts/installer/prereq
+ISCC.exe /DAppVersion=1.0.0 installer\DetailFrame.iss   # -> artifacts\installer\DetailFrame-Setup.exe
+```
+
+Install behaviour: per-machine (admin), x64 Windows 11 only, default `{autopf}\DetailFrame`. App goes to the install dir and the CPU worker to `{app}\worker`; no GPU libraries are packaged. Start Menu (default on) and desktop (default off) shortcuts are optional tasks using the DetailFrame icon. Settings and model weights are never written under Program Files; uninstall leaves `%LOCALAPPDATA%\DetailFrame` and the shared Windows App SDK runtime in place. The app locates the worker at `{app}\worker` by this installer's convention; confirm this matches the app's lookup when the shell integrates the worker.
+
+Windows App SDK: the app is unpackaged and framework-dependent on Windows App SDK 2.5.1 (`WindowsAppSDKSelfContained` is not set), so the runtime must be present. The installer checks `Microsoft.WindowsAppRuntime.2` >= 2.5.1.0 and, if missing, runs the bundled official bootstrapper `WindowsAppRuntimeInstall-x64.exe --quiet` (provisioning needs the installer's elevation), then re-checks. Failure is reported explicitly and aborts setup.
+
+Bootstrapper evidence (2026-10-20): `https://aka.ms/windowsappsdk/2.5/2.5.1/windowsappruntimeinstall-x64.exe` redirects to `download.microsoft.com`; downloaded 120,199,480 bytes, SHA-256 `931a421e8dc3e6e67724806cb67fecdbb88dfe323f0170842eb4a4b4b149f1e2`, valid Microsoft Corporation Authenticode signature, reports version 2.5.1. The hash is pinned in `prerequisites.ps1`; both the download helper and the installer-time check refuse a mismatch. It adds about 120 MB (before compression) to the installer. Not yet verified: actual install on a machine lacking the runtime, and compile/size of the installer.
+
+Alternatives: if the single-`.exe` bootstrapper proves unreliable, compare MSIX packaging (runtime resolved via package dependency, but different uninstall/sideload story) before replacing Inno Setup. No change was made.
+
+Exit codes of `prerequisites.ps1`: 0 ok, 10 unsupported OS, 11 unsupported architecture, 12 runtime install failed, 20 runtime missing (`-ProbeOnly`).
+
+## CPU baseline and optional acceleration (Task 4)
+
+The CPU-only baseline installer contains the WinUI application and the packaged worker built against the CPU PyTorch runtime. Users do not need a system Python installation. The installer does not bundle model weights; enabled models are downloaded explicitly and verified by the app before they are installed in the per-user cache. A missing weight is presented as a download requirement, not as a failed inference attempt.
+
+CUDA is **not currently offered**. There is no release-validated CUDA package, supported driver/runtime matrix, or per-model CUDA validation evidence in this repository. The baseline installer therefore has no CUDA component or CUDA payload. Do not add an installer selection until a supported driver/runtime matrix and passing CUDA validation for every advertised model are documented and the optional payload is separately staged and tested. This keeps CPU launch and inference independent of CUDA.
+
+Build the release installer with:
+
+```powershell
+pwsh -File installer/build.ps1 -Configuration Release
+```
+
+This command builds and verifies the app/worker artifacts, compiles `DetailFrame.iss` with `ISCC.exe`, then verifies the resulting setup executable. Inno Setup 6.3+ must be installed separately and `ISCC.exe` must be available on `PATH`. The compiler is not installed in the current build environment, so the setup executable remains an unverified release gate here; do not treat static checks as an installer build or clean-machine install test. Verify staged package contents with `pwsh -File installer/verify-artifacts.ps1` and scan for machine paths and unverified weights with `pwsh -File installer/verify-no-machine-paths.ps1 -Root artifacts\worker\win-x64` (and `artifacts\app\win-x64`); `build.ps1` scans only these shipped payload directories, never `artifacts\build`. Reviewed third-party false positives are exempted one file and one pattern at a time in `installer/machine-path-allowlist.json`, each with a reason; new findings still fail.
+
+User data: upgrades and the default uninstall keep `%LOCALAPPDATA%\DetailFrame` (Models, Settings). Interactive uninstall asks whether to also delete it (default No); a silent uninstall deletes it only with `/REMOVEUSERDATA`. Test: `pwsh -File tests/release/test_user_data_lifecycle.ps1` (static checks; a real install/upgrade/uninstall run is still a release gate).
+
+## Release validation and evidence package
+
+Use [`tests/release/release-checklist.md`](../tests/release/release-checklist.md) as the per-release sign-off record. Run it on a clean Windows 11 x64 machine or VM; static checks and artifact verification are not substitutes for an installer build or clean-machine install. Record each check as **PASS**, **FAIL**, **BLOCKED**, **N/A** (with reason), or **NOT RUN**, with tester, date, environment, and evidence reference. Never mark an unrun check as passed.
+
+Keep one evidence directory per release candidate (for example, `release-evidence/<version>-<commit>/`) outside the install payload. Include the completed checklist, clean-checkout/build logs, git commit and tool versions, deterministic artifact manifest, installer SHA-256, OS/build and hardware details, test results and supporting screenshots/logs, model catalog and per-model provenance/validation evidence, accessibility results, and recorded decisions on signing, update delivery, and minimum hardware/storage. Redact user names, local machine paths, credentials, and private image content from evidence. Preserve the directory as a single archive for release review.
+
+Public distribution is blocked until the checklist's required gates pass and all required policy decisions are recorded. In particular, do not ship an enabled model without its official-source, license, immutable digest, architecture/scale, and CPU inference evidence. The repository's model catalog is intentionally empty until a candidate meets those gates; a release without a usable verified model must not be presented as an image-enhancement release. CUDA remains unoffered unless its separate compatibility and per-model validation gates pass. Inno Setup compilation, clean Windows 11 installation, and real upgrade/recovery behavior must be recorded from actual runs; static tests alone do not close them.

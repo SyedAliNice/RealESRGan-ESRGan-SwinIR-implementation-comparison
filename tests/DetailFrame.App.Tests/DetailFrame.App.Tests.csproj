@@ -1,0 +1,37 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+    <Platforms>x64</Platforms>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.11.0" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.5" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="..\..\shared\reviewed-manifests.json" Link="shared\reviewed-manifests.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- Plain C# state is compiled directly so tests need not load the WinUI project. -->
+    <Compile Include="..\..\src\DetailFrame.App\Controls\ComparisonViewState.cs" Link="Controls\ComparisonViewState.cs" />
+    <Compile Include="..\..\src\DetailFrame.App\Controls\ViewerInputMapper.cs" Link="Controls\ViewerInputMapper.cs" />
+    <Compile Include="..\..\src\DetailFrame.App\Models\WorkflowState.cs" Link="Models\WorkflowState.cs" />
+    <Compile Include="..\..\src\DetailFrame.App\Models\WorkflowStage.cs" Link="Models\WorkflowStage.cs" />
+    <Compile Include="..\..\src\DetailFrame.App\Services\ImageInputService.cs" Link="Services\ImageInputService.cs" />
+    <Compile Include="..\..\src\DetailFrame.App\Services\SavePlaceholderCleaner.cs" Link="Services\SavePlaceholderCleaner.cs" />
+    <Compile Include="..\..\src\DetailFrame.App\Services\SaveResultService.cs" Link="Services\SaveResultService.cs" />
+    <Compile Include="..\..\src\DetailFrame.App\Models\ModelCatalog.cs" Link="Models\ModelCatalog.cs" />
+    <Compile Include="..\..\src\DetailFrame.App\Services\ModelCatalogService.cs" Link="Services\ModelCatalogService.cs" />
+    <Compile Include="..\..\src\DetailFrame.App\Services\ModelDownloadService.cs" Link="Services\ModelDownloadService.cs" />
+    <Compile Include="..\..\src\DetailFrame.App\Services\ValidationManifestVerifier.cs" Link="Services\ValidationManifestVerifier.cs" />
+    <Compile Include="..\..\src\DetailFrame.App\Services\WorkerProcessClient.cs" Link="Services\WorkerProcessClient.cs" />
+    <Compile Include="..\..\src\DetailFrame.App\Services\EnhancementCoordinator.cs" Link="Services\EnhancementCoordinator.cs" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,128 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "DetailFrame model catalog version 1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "models"],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "models": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/model"
+      }
+    }
+  },
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "validation_manifest_file": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*\\.json$"
+    },
+    "model": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "display_name",
+        "architecture",
+        "scale",
+        "weight_file",
+        "weight_url",
+        "sha256",
+        "license",
+        "provenance_url",
+        "devices",
+        "enabled"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+        },
+        "display_name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "architecture": {
+          "type": "string",
+          "minLength": 1
+        },
+        "scale": {
+          "type": "integer",
+          "minimum": 2
+        },
+        "weight_file": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$",
+          "not": {
+            "pattern": "^(?:[cC][oO][nN]|[pP][rR][nN]|[aA][uU][xX]|[nN][uU][lL]|[cC][oO][mM][1-9]|[lL][pP][tT][1-9])(?:\\..*)?$"
+          }
+        },
+        "weight_url": {
+          "type": "string",
+          "format": "https-url",
+          "pattern": "^(?i:https)://[^/@?#\\\\\\s]+(?:[/?#]|$)"
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "license": {
+          "type": "string",
+          "minLength": 1
+        },
+        "provenance_url": {
+          "type": "string",
+          "format": "https-url",
+          "pattern": "^(?i:https)://[^/@?#\\\\\\s]+(?:[/?#]|$)"
+        },
+        "size_bytes": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "devices": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "enum": ["cpu", "cuda"]
+          }
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "validation_manifest": {
+          "$ref": "#/$defs/validation_manifest_file"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "enabled": {
+                "const": true
+              }
+            },
+            "required": ["enabled"]
+          },
+          "then": {
+            "required": ["validation_manifest"],
+            "properties": {
+              "devices": {
+                "minItems": 1,
+                "contains": {
+                  "const": "cpu"
+                }
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

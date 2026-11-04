@@ -1,0 +1,116 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "DetailFrame independently reviewed model validation manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "manifest_version",
+    "model_id",
+    "checkpoint_sha256",
+    "weight_url",
+    "license",
+    "provenance_url",
+    "architecture",
+    "scale",
+    "architecture_config",
+    "architecture_config_sha256",
+    "expected_state_dict",
+    "device_validation"
+  ],
+  "properties": {
+    "manifest_version": {
+      "const": 1
+    },
+    "model_id": {
+      "type": "string",
+      "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+    },
+    "checkpoint_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "weight_url": {
+      "type": "string",
+      "format": "https-url",
+      "pattern": "^(?i:https)://[^/@?#\\\\\\s]+(?:[/?#]|$)"
+    },
+    "license": {
+      "type": "string",
+      "minLength": 1
+    },
+    "provenance_url": {
+      "type": "string",
+      "format": "https-url",
+      "pattern": "^(?i:https)://[^/@?#\\\\\\s]+(?:[/?#]|$)"
+    },
+    "architecture": {
+      "type": "string",
+      "minLength": 1
+    },
+    "scale": {
+      "type": "integer",
+      "minimum": 2
+    },
+    "architecture_config": {
+      "type": "object",
+      "minProperties": 1
+    },
+    "architecture_config_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "expected_state_dict": {
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": {
+        "minLength": 1
+      },
+      "additionalProperties": {
+        "type": "array",
+        "minItems": 1,
+        "items": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "device_validation": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": false,
+      "properties": {
+        "cpu": {
+          "$ref": "#/$defs/validation_record"
+        },
+        "cuda": {
+          "$ref": "#/$defs/validation_record"
+        }
+      }
+    }
+  },
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "validation_record": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "tested_at", "torch_version", "checkpoint_sha256"],
+      "properties": {
+        "status": {
+          "const": "passed"
+        },
+        "tested_at": {
+          "type": "string",
+          "format": "date"
+        },
+        "torch_version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "checkpoint_sha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    }
+  }
+}

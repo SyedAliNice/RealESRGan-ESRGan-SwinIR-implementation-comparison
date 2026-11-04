@@ -1,0 +1,64 @@
+<UserControl
+    x:Class="DetailFrame.App.Views.ChooseImagePage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <Grid Padding="32" RowSpacing="16">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <TextBlock Style="{StaticResource TitleTextBlockStyle}"
+                   Text="Choose image"
+                   AutomationProperties.HeadingLevel="Level1" />
+
+        <InfoBar x:Name="ErrorBar"
+                 Grid.Row="1"
+                 Severity="Error"
+                 IsClosable="True"
+                 IsOpen="False" />
+
+        <Border x:Name="DropZone"
+                Grid.Row="2"
+                AllowDrop="True"
+                CornerRadius="8"
+                BorderThickness="2"
+                BorderBrush="{ThemeResource ControlStrokeColorDefaultBrush}"
+                Background="{ThemeResource LayerFillColorDefaultBrush}"
+                DragOver="DropZone_DragOver"
+                Drop="DropZone_Drop"
+                AutomationProperties.Name="Image drop area">
+            <Grid>
+                <Image x:Name="Preview"
+                       Stretch="Uniform"
+                       Margin="8"
+                       Visibility="Collapsed"
+                       AutomationProperties.Name="Source image preview" />
+                <StackPanel x:Name="Prompt"
+                            VerticalAlignment="Center"
+                            HorizontalAlignment="Center"
+                            Spacing="8">
+                    <FontIcon Glyph="&#xE91B;" FontSize="40" />
+                    <TextBlock Text="Drag an image here"
+                               Style="{StaticResource SubtitleTextBlockStyle}"
+                               HorizontalAlignment="Center" />
+                    <TextBlock Text="PNG, JPEG or WebP"
+                               HorizontalAlignment="Center"
+                               Opacity="0.7" />
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <StackPanel Grid.Row="3" Orientation="Horizontal" Spacing="16">
+            <Button x:Name="BrowseButton"
+                    Content="Browse…"
+                    Style="{StaticResource AccentButtonStyle}"
+                    Click="BrowseButton_Click" />
+            <TextBlock x:Name="Details"
+                       VerticalAlignment="Center"
+                       TextTrimming="CharacterEllipsis" />
+        </StackPanel>
+    </Grid>
+</UserControl>

@@ -1,0 +1,12 @@
+[
+  { "path": "_internal/numpy-2.3.3.dist-info/DELVEWHEEL", "pattern": "user profile path", "reason": "Upstream NumPy wheel build log; paths are the PyPI CI runner (runneradmin), not this machine." },
+  { "path": "_internal/rpds/rpds.cp314-win_amd64.pyd", "pattern": "user profile path", "reason": "Upstream rpds-py wheel embeds Rust panic-location paths from the CI runner (runneradmin .cargo registry), not this machine." },
+  { "path": "_internal/torch/_appdirs.py", "pattern": "user profile path", "reason": "Docstring examples using the literal placeholder C:\\Users\\<username>." },
+  { "path": "_internal/torch/hub.py", "pattern": "credential", "reason": "Source line TOKEN = \"GITHUB_TOKEN\" names an environment variable; no secret value." },
+  { "path": "_internal/torch/distributed/elastic/rendezvous/c10d_rendezvous_backend.py", "pattern": "credential", "reason": "Python identifiers (token = state_token_pair); not a credential." },
+  { "path": "_internal/torch/distributed/elastic/rendezvous/dynamic_rendezvous.py", "pattern": "credential", "reason": "Python identifiers (token = get_response); not a credential." },
+  { "path": "_internal/torch/export/_remove_effect_tokens_pass.py", "pattern": "credential", "reason": "Compiler 'token' type identifiers; not a credential." },
+  { "path": "_internal/torch/_export/serde/serialize.py", "pattern": "credential", "reason": "Compiler 'token=InputTokenSpec' identifiers; not a credential." },
+  { "path": "_internal/torch/_functorch/compile_utils.py", "pattern": "credential", "reason": "Compiler 'token' type annotation; not a credential." },
+  { "path": "_internal/torch/_higher_order_ops/effects.py", "pattern": "credential", "reason": "Python identifier (token = new_token_tensor); not a credential." }
+]
