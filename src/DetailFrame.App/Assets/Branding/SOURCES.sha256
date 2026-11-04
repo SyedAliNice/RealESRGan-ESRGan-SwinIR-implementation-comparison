@@ -1,8 +1,6 @@
 # Branding sources (copied unmodified; SHA-256 of repository files)
-# app.ico        <- C:\Users\cihan\.copilot\attachments\f8ee6391-7e86-4075-93be-7131372e5bd0-app.ico (identical to OneDrive DetailFrame\assets\app.ico)
-# detailframe.svg       <- ...\attachments\03c3ee41-05af-4d65-af49-c81b6519c072-detailframe.svg
-# detailframe-small.svg <- ...\attachments\d41e8509-ee39-45af-92c4-7adbb5d0ade4-detailframe-small.svg
-# app-*.png      <- C:\Users\cihan\OneDrive\AI Projects\workspace\DetailFrame\assets\exports\
+# User-supplied DetailFrame branding: ICO and SVG attachments and PNG exports.
+# The repository copies below are the reproducible build inputs.
 d2a705f7f833b9ba17e12d0a924de2b92fa5251bf26af66b0d8e83a2de7e4a0b  app-128.png
 94d1fa1ab7708f8880322938dc13576c8f8a16121772dfd27a9bf463d3d029f0  app-16.png
 153ed14a024048b588d38ed61c778f9621a06f008dab07615bb7afa9b1d998d1  app-20.png

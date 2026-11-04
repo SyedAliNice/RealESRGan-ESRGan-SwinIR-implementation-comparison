@@ -72,4 +72,18 @@ public class WorkflowNavigationTests
 
         Assert.False(WorkflowStages.IsAvailable(busy, WorkflowStage.Enhance));
     }
+
+    [Fact]
+    public void ConfigurationCompletionTracksSelectionNotOldResult()
+    {
+        Assert.Equal(StageStatus.Completed, WorkflowStages.GetStatus(Ready, WorkflowStage.Configure));
+        var noSelection = Ready with { SelectedModelId = null, ResultPath = "old.png" };
+        Assert.Equal(StageStatus.Available, WorkflowStages.GetStatus(noSelection, WorkflowStage.Configure));
+    }
+
+    [Fact]
+    public void WhitespaceJobIdDoesNotBlockEnhancement()
+    {
+        Assert.True((Ready with { ActiveJobId = "  " }).CanEnhance);
+    }
 }

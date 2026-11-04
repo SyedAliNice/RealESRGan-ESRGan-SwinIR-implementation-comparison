@@ -86,7 +86,13 @@ begin
       'Choose No to keep them for a future install. Downloaded models would need to be downloaded again.',
       mbConfirmation, MB_YESNO or MB_DEFBUTTON2) = IDYES;
   if Remove then
-    DelTree(UserDataDir, True, True, True);
+    if not DelTree(UserDataDir, True, True, True) then
+    begin
+      Log('Could not remove DetailFrame user data.');
+      if not UninstallSilent then
+        MsgBox('Some DetailFrame user data could not be removed. Remove it manually if needed.',
+          mbError, MB_OK);
+    end;
 end;
 
 function RunPrerequisites(const Extra: String; var ExitCode: Integer): Boolean;

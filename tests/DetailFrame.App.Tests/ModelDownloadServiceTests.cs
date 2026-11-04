@@ -83,14 +83,14 @@ public sealed class ModelDownloadServiceTests : IDisposable
     {
         var svc = Service(new FakeHandler(_ => Ok()));
         var v = Variant(size: Payload.Length);
-        Assert.Null(svc.GetInstalled(v));
+        Assert.Null(await svc.GetInstalledAsync(v));
         var progress = new Collector();
 
         var installed = await svc.DownloadAndVerifyAsync(v, progress, CancellationToken.None);
 
         Assert.Equal(Payload, await File.ReadAllBytesAsync(installed.Path));
         Assert.Equal(svc.InstalledPath(v), installed.Path);
-        Assert.NotNull(svc.GetInstalled(v));
+        Assert.NotNull(await svc.GetInstalledAsync(v));
         Assert.Equal(installed.Path, Assert.Single(CacheFiles(_root)));
         Assert.Equal(Payload.Length, progress.Items[^1].BytesReceived);
         Assert.Equal(Payload.Length, progress.Items[^1].TotalBytes);
@@ -109,7 +109,7 @@ public sealed class ModelDownloadServiceTests : IDisposable
         corrupted[1000] ^= 0xFF;
         await File.WriteAllBytesAsync(installed.Path, corrupted);
 
-        Assert.Null(svc.GetInstalled(v));
+        Assert.Null(await svc.GetInstalledAsync(v));
         await svc.DownloadAndVerifyAsync(v, new Collector(), CancellationToken.None);
         Assert.Equal(2, handler.Calls);
         Assert.Equal(Payload, await File.ReadAllBytesAsync(installed.Path));
@@ -138,7 +138,7 @@ public sealed class ModelDownloadServiceTests : IDisposable
         Assert.Equal(DownloadFailure.HashMismatch, ex.Failure);
         Assert.Equal(1, handler.Calls);
         Assert.Empty(CacheFiles(_root));
-        Assert.Null(svc.GetInstalled(v));
+        Assert.Null(await svc.GetInstalledAsync(v));
     }
 
     [Fact]
@@ -170,11 +170,11 @@ public sealed class ModelDownloadServiceTests : IDisposable
         Assert.Equal(DownloadFailure.Network, ex.Failure);
         Assert.Equal(3, handler.Calls);
         Assert.Empty(CacheFiles(_root));
-        Assert.Null(svc.GetInstalled(v));
+        Assert.Null(await svc.GetInstalledAsync(v));
 
         failing = false;
         await svc.DownloadAndVerifyAsync(v, new Collector(), CancellationToken.None);
-        Assert.NotNull(svc.GetInstalled(v));
+        Assert.NotNull(await svc.GetInstalledAsync(v));
     }
 
     [Fact]
@@ -186,6 +186,34 @@ public sealed class ModelDownloadServiceTests : IDisposable
         var ex = await Assert.ThrowsAsync<ModelDownloadException>(
             () => svc.DownloadAndVerifyAsync(v, new Collector(), CancellationToken.None));
         Assert.Equal(DownloadFailure.SizeMismatch, ex.Failure);
+        Assert.Empty(CacheFiles(_root));
+    }
+
+    [Fact]
+    public async Task DownloadStopsBeforeWritingPastPinnedSize()
+    {
+        var svc = Service(new FakeHandler(_ => Ok()));
+        var progress = new Collector();
+        var ex = await Assert.ThrowsAsync<ModelDownloadException>(() =>
+            svc.DownloadAndVerifyAsync(Variant(size: 1000), progress, CancellationToken.None));
+        Assert.Equal(DownloadFailure.SizeMismatch, ex.Failure);
+        Assert.Empty(progress.Items);
+        Assert.Empty(CacheFiles(_root));
+    }
+
+    [Fact]
+    public async Task UnknownLengthDownloadStopsAtBound()
+    {
+        var handler = new FakeHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StreamContent(new FailingStream(Payload, Payload.Length))
+        });
+        var svc = new ModelDownloadService(new HttpClient(handler), _root, TimeSpan.Zero, maxDownloadBytes: 1000);
+        var progress = new Collector();
+        var ex = await Assert.ThrowsAsync<ModelDownloadException>(() =>
+            svc.DownloadAndVerifyAsync(Variant(), progress, CancellationToken.None));
+        Assert.Equal(DownloadFailure.SizeMismatch, ex.Failure);
+        Assert.Empty(progress.Items);
         Assert.Empty(CacheFiles(_root));
     }
 

@@ -5,6 +5,12 @@ from detailframe_worker.images import validate_image
 from detailframe_worker.protocol import ProtocolError
 
 
+def test_pillow_warning_threshold_matches_first_rejected_pixel_count():
+    from detailframe_worker.images import pillow_pixel_limit
+    with pillow_pixel_limit(100):
+        assert Image.MAX_IMAGE_PIXELS == 99
+
+
 @pytest.mark.parametrize(
     ("format_name", "extension"),
     [("PNG", ".png"), ("JPEG", ".jpg"), ("WEBP", ".webp")],

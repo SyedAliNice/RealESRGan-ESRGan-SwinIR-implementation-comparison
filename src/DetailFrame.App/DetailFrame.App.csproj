@@ -23,8 +23,7 @@
   </ItemGroup>
   <ItemGroup>
     <Content Include="Assets\Branding\*.ico;Assets\Branding\*.png;Assets\Branding\*.svg" CopyToOutputDirectory="PreserveNewest" />
-    <Content Include="..\..\shared\models.json" Link="shared\models.json" CopyToOutputDirectory="PreserveNewest" />
-    <Content Include="..\..\shared\models.schema.json" Link="shared\models.schema.json" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\..\shared\*.json" Link="shared\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

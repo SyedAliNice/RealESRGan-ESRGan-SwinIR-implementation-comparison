@@ -96,3 +96,34 @@ def test_auto_without_validated_cpu_or_cuda_is_device_unavailable(monkeypatch):
     with pytest.raises(ProtocolError) as error:
         engine.resolve_device("auto", cuda_only)
     assert error.value.code == "DEVICE_UNAVAILABLE"
+
+
+def test_capabilities_include_enabled_implemented_models(tmp_path, monkeypatch):
+    monkeypatch.setattr(engine, "load_catalog", lambda _path: (variant(),))
+    monkeypatch.setitem(engine.ADAPTERS, "test-nearest", ModelAdapter(lambda _v, _s: Nearest()))
+    stdout = io.StringIO()
+    request = json.dumps({"protocol_version": 1, "type": "capabilities",
+                          "request_id": "00000000-0000-4000-8000-000000000001"})
+    run_worker(io.StringIO(request + "\n"), stdout, io.StringIO(), tmp_path)
+    assert json.loads(stdout.getvalue())["models"] == [
+        {"id": "test-model", "scales": [2], "devices": ["cpu"]}
+    ]
+
+
+def test_checkpoint_path_matches_digest_keyed_app_cache(tmp_path, monkeypatch):
+    model = variant()
+    expected = tmp_path / model.sha256 / model.weight_file
+    seen = []
+    monkeypatch.setattr(engine, "validate_checkpoint", lambda _variant, path: seen.append(path))
+    with pytest.raises(ProtocolError):
+        engine._load_state_dict(model, tmp_path)
+    assert seen == [expected]
+
+
+def test_catalog_path_can_be_separate_from_weight_cache(tmp_path, monkeypatch):
+    catalog = tmp_path / "installed" / "models.json"
+    monkeypatch.setenv("DETAILFRAME_CATALOG_PATH", str(catalog))
+    seen = []
+    monkeypatch.setattr(engine, "load_catalog", lambda path: seen.append(path) or ())
+    engine.available_devices(tmp_path / "cache")
+    assert seen == [catalog]

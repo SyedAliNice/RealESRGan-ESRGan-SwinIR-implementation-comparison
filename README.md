@@ -86,6 +86,10 @@ Branding assets live in `src/DetailFrame.App/Assets/Branding/` (ICO, SVG, PNG 16
 
 The shipped model catalog (`shared/models.json`) is currently empty, so no real enhancement can run yet; the workflow is covered by tests with a fake worker.
 
+The installed app and worker use the catalog, schema, and reviewed manifest files in the app's `shared` directory. Verified downloads are stored per user at `%LOCALAPPDATA%\DetailFrame\Models\<sha256>\<filename>`; downloads are limited to 4 GiB even when no size is listed. Worker diagnostics use rotating files under `%LOCALAPPDATA%\DetailFrame\Logs` (1 MiB per file, three backups) and omit image paths and content. The empty production manifest allowlists remain a release gate for every model.
+
+Installer compilation, installation and upgrade/uninstall, clean Windows 11 VM testing, manual UI/accessibility checks, a rebuilt packaged worker, and real model-backed inference remain unverified release gates; see `tests/release/release-checklist.md`.
+
 ## Windows 11 manual acceptance checklist
 
 - [ ] App launches; window and taskbar show the DetailFrame icon.

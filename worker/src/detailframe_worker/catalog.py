@@ -58,7 +58,7 @@ def _is_https_url(value: str) -> bool:
     if not isinstance(value, str) or not value:
         return False
     if any(
-        character.isspace() or ord(character) < 0x20 or ord(character) == 0x7F
+        character == "\\" or character.isspace() or ord(character) < 0x20 or ord(character) == 0x7F
         for character in value
     ):
         return False

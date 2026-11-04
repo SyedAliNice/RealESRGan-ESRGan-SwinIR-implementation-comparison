@@ -6,16 +6,22 @@ namespace DetailFrame.App.Services;
 public sealed class ModelDownloadService
 {
     private const int MaxAttempts = 3;
+    private const long MaximumDownloadBytes = 4L * 1024 * 1024 * 1024;
 
     private readonly HttpClient _http;
     private readonly string _cacheRoot;
     private readonly TimeSpan _retryDelay;
+    private readonly long _maxDownloadBytes;
 
-    public ModelDownloadService(HttpClient http, string? cacheRoot = null, TimeSpan? retryDelay = null)
+    public ModelDownloadService(HttpClient http, string? cacheRoot = null, TimeSpan? retryDelay = null,
+        long maxDownloadBytes = MaximumDownloadBytes)
     {
+        if (maxDownloadBytes is <= 0 or > MaximumDownloadBytes)
+            throw new ArgumentOutOfRangeException(nameof(maxDownloadBytes));
         _http = http;
         _cacheRoot = cacheRoot ?? DefaultCacheRoot;
         _retryDelay = retryDelay ?? TimeSpan.FromSeconds(2);
+        _maxDownloadBytes = maxDownloadBytes;
     }
 
     public static string DefaultCacheRoot => Path.Combine(
@@ -25,31 +31,33 @@ public sealed class ModelDownloadService
     public string InstalledPath(ModelVariant variant) =>
         Path.Combine(_cacheRoot, variant.Sha256, variant.WeightFile);
 
-    public InstalledModel? GetInstalled(ModelVariant variant)
+    private InstalledModel? GetInstalled(ModelVariant variant)
     {
-        var info = new FileInfo(InstalledPath(variant));
-        if (!info.Exists || (variant.SizeBytes is { } expected && info.Length != expected))
-        {
-            return null;
-        }
-
         // Re-hash so same-length corruption of a cached file is never treated as installed.
         try
         {
+            var info = new FileInfo(InstalledPath(variant));
+            if (!info.Exists || (variant.SizeBytes is { } expected && info.Length != expected))
+            {
+                return null;
+            }
             using var stream = new FileStream(info.FullName, FileMode.Open, FileAccess.Read, FileShare.Read);
             var digest = Convert.ToHexString(SHA256.HashData(stream)).ToLowerInvariant();
             if (digest != variant.Sha256)
             {
                 return null;
             }
+            return new InstalledModel(variant, info.FullName, info.Length);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             return null;
         }
-
-        return new InstalledModel(variant, info.FullName, info.Length);
     }
+
+    /// <summary>Revalidates the cache off the caller's UI thread.</summary>
+    public Task<InstalledModel?> GetInstalledAsync(ModelVariant variant, CancellationToken cancellationToken = default) =>
+        Task.Run(() => GetInstalled(variant), cancellationToken);
 
     public async Task<InstalledModel> DownloadAndVerifyAsync(
         ModelVariant variant,
@@ -61,7 +69,7 @@ public sealed class ModelDownloadService
             throw new ModelDownloadException(DownloadFailure.InvalidSource, "The model source must use HTTPS.");
         }
 
-        if (GetInstalled(variant) is { } existing)
+        if (await GetInstalledAsync(variant, cancellationToken) is { } existing)
         {
             return existing;
         }
@@ -101,6 +109,11 @@ public sealed class ModelDownloadService
             }
 
             var total = response.Content.Headers.ContentLength ?? variant.SizeBytes;
+            var limit = Math.Min(variant.SizeBytes ?? _maxDownloadBytes, _maxDownloadBytes);
+            if (total > limit)
+            {
+                throw new ModelDownloadException(DownloadFailure.SizeMismatch, "The model download exceeds its allowed size.");
+            }
             using var hasher = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
             long received = 0;
             await using (var source = await response.Content.ReadAsStreamAsync(ct))
@@ -111,6 +124,10 @@ public sealed class ModelDownloadService
                 int read;
                 while ((read = await source.ReadAsync(buffer, ct)) > 0)
                 {
+                    if (read > limit - received)
+                    {
+                        throw new ModelDownloadException(DownloadFailure.SizeMismatch, "The model download exceeds its allowed size.");
+                    }
                     hasher.AppendData(buffer, 0, read);
                     try
                     {

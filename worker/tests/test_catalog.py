@@ -1,5 +1,6 @@
 import hashlib
 import json
+import re
 import shutil
 from pathlib import Path
 
@@ -89,6 +90,16 @@ def write_catalog(directory: Path, entries):
 
 def test_loads_empty_version_one_catalog():
     assert load_catalog(SHARED_ROOT / "models.json") == ()
+
+
+def test_production_worker_and_app_trust_lists_remain_empty_together():
+    app = (REPOSITORY_ROOT / "src" / "DetailFrame.App" / "Services" /
+           "ValidationManifestVerifier.cs").read_text(encoding="utf-8")
+    assert catalog_module.REVIEWED_VALIDATION_MANIFESTS == {}
+    assert re.search(
+        r"ReviewedManifests\s*\{\s*get;\s*\}\s*=\s*new Dictionary<string, string>\(\)\s*;",
+        app,
+    )
 
 
 def test_loads_empty_catalog_without_adjacent_manifest_schema(tmp_path):

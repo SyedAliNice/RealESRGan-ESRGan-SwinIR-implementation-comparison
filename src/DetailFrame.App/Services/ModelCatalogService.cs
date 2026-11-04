@@ -1,5 +1,8 @@
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using System.Globalization;
+using System.Net;
+using System.Net.Sockets;
 using DetailFrame.App.Models;
 
 namespace DetailFrame.App.Services;
@@ -74,11 +77,23 @@ public sealed class ModelCatalogService
             }
 
             var result = new List<ModelVariant>();
-            var seen = new HashSet<(string, int)>();
+            var seen = new HashSet<string>();
             foreach (var entry in models.EnumerateArray())
             {
-                var variant = TryReadEntry(entry, catalogDirectory, reviewedManifests ?? ValidationManifestVerifier.ReviewedManifests);
-                if (variant is not null && seen.Add((variant.Id, variant.Scale)))
+                if (entry.ValueKind == JsonValueKind.Object
+                    && entry.TryGetProperty("id", out var idElement)
+                    && idElement.ValueKind == JsonValueKind.String
+                    && !seen.Add(idElement.GetString()!))
+                {
+                    throw new CatalogException("The model catalog contains duplicate model IDs.");
+                }
+                var variant = TryReadEntry(entry, catalogDirectory,
+                    reviewedManifests ?? ValidationManifestVerifier.ReviewedManifests, out var valid);
+                if (!valid || (variant is null && entry.GetProperty("enabled").ValueKind == JsonValueKind.True))
+                {
+                    return [];
+                }
+                if (variant is not null)
                 {
                     result.Add(variant);
                 }
@@ -94,8 +109,9 @@ public sealed class ModelCatalogService
 
     // Returns null for malformed, disabled, or entries without a reviewed validation manifest.
     private static ModelVariant? TryReadEntry(
-        JsonElement e, string catalogDirectory, IReadOnlyDictionary<string, string> reviewed)
+        JsonElement e, string catalogDirectory, IReadOnlyDictionary<string, string> reviewed, out bool valid)
     {
+        valid = false;
         if (e.ValueKind != JsonValueKind.Object)
         {
             return null;
@@ -166,18 +182,20 @@ public sealed class ModelCatalogService
             manifest = manifestElement.GetString();
         }
 
+        if (e.GetProperty("enabled").ValueKind == JsonValueKind.True
+            && (manifest is null || !devices.Contains("cpu")))
+        {
+            return null;
+        }
+
+        valid = true;
         if (e.GetProperty("enabled").ValueKind != JsonValueKind.True)
         {
             return null;
         }
 
-        if (manifest is null || !devices.Contains("cpu"))
-        {
-            return null;
-        }
-
-        var variant = new ModelVariant(id, name, arch, scale, file, url, sha, license, provenance, size, devices, manifest);
-        return ValidationManifestVerifier.Verify(Path.Combine(catalogDirectory, manifest), variant, reviewed)
+        var variant = new ModelVariant(id, name, arch, scale, file, url, sha, license, provenance, size, devices, manifest!);
+        return ValidationManifestVerifier.Verify(Path.Combine(catalogDirectory, manifest!), variant, reviewed)
             ? variant
             : null;
     }
@@ -203,9 +221,44 @@ public sealed class ModelCatalogService
             return false;
         }
 
-        return Uri.TryCreate(value, UriKind.Absolute, out var uri)
-            && uri.Scheme == Uri.UriSchemeHttps
-            && string.IsNullOrEmpty(uri.UserInfo)
-            && !string.IsNullOrEmpty(uri.Host);
+        var match = Regex.Match(value, "^https://([^/?#]+)([^?#]*)", RegexOptions.IgnoreCase);
+        if (!match.Success || match.Groups[2].Value is "" or "/"
+            || !Uri.TryCreate(value, UriKind.Absolute, out var uri)
+            || uri.Scheme != Uri.UriSchemeHttps || !string.IsNullOrEmpty(uri.UserInfo))
+            return false;
+        var authority = match.Groups[1].Value;
+        string host;
+        string port = "";
+        if (authority.StartsWith('['))
+        {
+            var closing = authority.IndexOf(']');
+            if (closing < 0 || !IPAddress.TryParse(authority[1..closing], out var address)
+                || address.AddressFamily != AddressFamily.InterNetworkV6)
+                return false;
+            host = authority[1..closing];
+            port = authority[(closing + 1)..];
+        }
+        else
+        {
+            var colon = authority.IndexOf(':');
+            host = colon < 0 ? authority : authority[..colon];
+            port = colon < 0 ? "" : authority[colon..];
+            try
+            {
+                var ascii = new IdnMapping().GetAscii(host).TrimEnd('.').ToLowerInvariant();
+                if (ascii.Length is 0 or > 253 || ascii.Split('.').Any(label =>
+                    label.Length is 0 or > 63
+                    || !Regex.IsMatch(label, "^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$")))
+                    return false;
+                if (ascii.All(c => char.IsAsciiDigit(c) || c == '.')
+                    && (!IPAddress.TryParse(ascii, out var ip) || ip.AddressFamily != AddressFamily.InterNetwork
+                        || ip.ToString() != ascii))
+                    return false;
+            }
+            catch (ArgumentException) { return false; }
+        }
+
+        return port.Length == 0 || (Regex.IsMatch(port, "^:[0-9]+$")
+            && int.TryParse(port.AsSpan(1), out var number) && number is >= 1 and <= 65535);
     }
 }

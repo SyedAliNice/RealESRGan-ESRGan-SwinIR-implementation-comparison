@@ -47,20 +47,23 @@ Check "input policy rejects bad ArtifactsRoot join" ((Find-BadInputs '$d = Join-
 Check "input policy accepts allowed inputs" ((Find-BadInputs 'Source: "artifacts\app\win-x64\*"; Source: "src\DetailFrame.App\Assets\Branding\app.ico"').Count -eq 0)
 # Verifier behaviour on fixtures inside the ignored artifacts directory.
 $verify = Join-Path $repo "installer\verify-artifacts.ps1"
-$fixture = Join-Path $repo "artifacts\test-fixture\layout"
+$testRoot = Join-Path $repo ("artifacts\test-fixture\layout-" + [guid]::NewGuid().ToString("N"))
+$fixture = Join-Path $testRoot "layout"
 $pyVersion = [regex]::Match((Get-Content (Join-Path $repo "worker\pyproject.toml") -Raw), '(?m)^version\s*=\s*"([^"]+)"').Groups[1].Value
 $WorkerStubVersion = $pyVersion
 $stubCache = @{}
 # Compiles a tiny x64 console exe that prints a worker version, using the in-box .NET Framework C# compiler.
 function New-WorkerStub([string]$Version) {
     if ($stubCache.ContainsKey($Version)) { return $stubCache[$Version] }
-    $dir = Join-Path $repo "artifacts\test-fixture-stubs"
+    $dir = Join-Path $testRoot "stubs"
     New-Item -ItemType Directory -Force $dir | Out-Null
     $exe = Join-Path $dir "worker-$Version.exe"
     $cs = Join-Path $dir "worker-$Version.cs"
     Set-Content $cs "public class P { public static void Main() { System.Console.WriteLine(`"detailframe-worker $Version`"); } }"
     $csc = Join-Path $env:SystemRoot "Microsoft.NET\Framework64\v4.0.30319\csc.exe"
-    & $csc /nologo /platform:x64 "/out:$exe" $cs *> $null
+    if (-not (Test-Path $csc)) { throw "Fixture compiler not found: $csc" }
+    $compilerOutput = & $csc /nologo /platform:x64 "/out:$exe" $cs 2>&1
+    if ($LASTEXITCODE -ne 0) { throw "Fixture compiler failed ($LASTEXITCODE): $compilerOutput" }
     $stubCache[$Version] = $exe
     return $exe
 }
@@ -73,7 +76,8 @@ function New-Fixture {
     Copy-Item $stub "$app\DetailFrame.App.exe"
     Copy-Item (New-WorkerStub $WorkerStubVersion) "$wk\detailframe-worker.exe"
     Set-Content "$app\System.Runtime.dll" "r"; Set-Content "$app\coreclr.dll" "c"; Set-Content "$app\sub\native.bin" "n"
-    Set-Content "$app\shared\models.json" "{}"; Set-Content "$app\Assets\Branding\app.ico" "x"
+    Set-Content "$app\shared\models.json" "{}"; Set-Content "$app\shared\models.schema.json" "{}"
+    Set-Content "$app\Assets\Branding\app.ico" "x"
     Set-Content "$wk\dependency-manifest.txt" "numpy==1.0`nattrs==2.0"
 }
 function Invoke-Verify([hashtable]$Extra = @{}) {
@@ -94,6 +98,12 @@ try {
     Check "manifest worker version comes from built exe" ($json.workerVersion -eq $pyVersion)
     Check "runtime inventory is comprehensive (all runtime files, hashed)" (($json.appRuntime.path -contains "app/win-x64/System.Runtime.dll") -and ($json.appRuntime.path -contains "app/win-x64/coreclr.dll") -and ($json.appRuntime.path -contains "app/win-x64/sub/native.bin") -and ($json.appRuntime | Where-Object { $_.sha256.Length -ne 64 }).Count -eq 0)
     Check "app/runtime/worker roles separated" (($json.files | Where-Object { $_.path -eq "app/win-x64/DetailFrame.App.exe" }).role -eq "app" -and ($json.files | Where-Object { $_.path -eq "app/win-x64/coreclr.dll" }).role -eq "runtime" -and ($json.files | Where-Object { $_.path -eq "worker/win-x64/detailframe-worker.exe" }).role -eq "worker")
+    $hardlinkSource = Join-Path $testRoot "outside-file"
+    Set-Content $hardlinkSource "outside"
+    $hardlink = Join-Path $fixture "app\win-x64\linked.bin"
+    New-Item -ItemType HardLink -Path $hardlink -Target $hardlinkSource | Out-Null
+    Check "verify rejects hardlinked payload files" (-not (Invoke-Verify))
+    Remove-Item $hardlink, $hardlinkSource
     Check "verify fails when installer required but absent" (-not (Invoke-Verify @{ RequireInstaller = $true }))
 
     Remove-Item "$fixture\worker\win-x64\detailframe-worker.exe"
@@ -133,14 +143,11 @@ try {
     cmd /c rmdir "$fixture\app"
 
     $ok = $true
-    try { & pwsh -NoProfile -File $verify -RepoRoot $repo -ArtifactsRoot $env:TEMP *> $null; $ok = ($LASTEXITCODE -eq 0) } catch { $ok = $false }
+    try { & pwsh -NoProfile -File $verify -RepoRoot $repo -ArtifactsRoot $repo *> $null; $ok = ($LASTEXITCODE -eq 0) } catch { $ok = $false }
     Check "verify rejects artifact root outside repository" (-not $ok)
 }
 finally {
-    foreach ($d in "test-fixture", "test-fixture-stubs", "outside", "outside-w") {
-        $x = Join-Path $repo "artifacts\$d"
-        if (Test-Path $x) { Remove-Item -Recurse -Force $x }
-    }
+    if (Test-Path $testRoot) { Remove-Item -Recurse -Force $testRoot }
 }
 
 if ($failures.Count -gt 0) { "FAILED: $($failures.Count) check(s)"; exit 1 }

@@ -1,4 +1,5 @@
 import queue
+import logging
 import threading
 import traceback
 from dataclasses import dataclass
@@ -20,6 +21,7 @@ from detailframe_worker.protocol import (
 )
 
 SHUTDOWN_TIMEOUT_SECONDS = 1.0
+_log = logging.getLogger("detailframe_worker")
 
 
 def _error_event(error: ProtocolError) -> dict[str, object]:
@@ -87,6 +89,7 @@ def _execute_enhance(
             "job_id": request.job_id,
         }
     except ProtocolError as error:
+        _log.warning("Enhancement failed: %s", error.code)
         return _job_failure(request.job_id, error.code, error.message)
     return {
         "protocol_version": PROTOCOL_VERSION,
@@ -124,6 +127,7 @@ def _start_job(
                 ),
             )
         except Exception:
+            _log.error("Enhancement failed unexpectedly")
             traceback.print_exc(file=stderr)
             event = _job_failure(
                 request.job_id,
@@ -204,7 +208,7 @@ def run_worker(stdin: TextIO, stdout: TextIO, stderr: TextIO, models_dir: Path) 
                             "type": "capabilities_result",
                             "request_id": message.request_id,
                             "worker_version": __version__,
-                            "models": [],
+                            "models": engine.available_models(models_dir),
                             "devices": engine.available_devices(models_dir),
                         }
                     )

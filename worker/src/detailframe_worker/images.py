@@ -32,7 +32,8 @@ def pillow_pixel_limit(max_pixels: int) -> Iterator[None]:
     """Align Pillow's bomb threshold with the explicit cap, then restore it."""
     with _PILLOW_LIMIT_LOCK:
         previous = Image.MAX_IMAGE_PIXELS
-        Image.MAX_IMAGE_PIXELS = max_pixels
+        # Pillow warns only above its threshold, while our cap rejects equality.
+        Image.MAX_IMAGE_PIXELS = max_pixels - 1
         try:
             yield
         finally:

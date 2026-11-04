@@ -18,8 +18,7 @@ Check "build does not scan whole artifacts root" ($buildText -notmatch '-Root \(
 $entries = @(Get-Content $allow -Raw | ConvertFrom-Json)
 Check "allowlist entries are exact and justified" (@($entries | Where-Object { -not $_.path -or -not $_.pattern -or -not $_.reason -or $_.path -match '[*?]' }).Count -eq 0)
 
-$scratch = Join-Path $repo "artifacts\test-scratch\machine-path-scan"
-if (Test-Path $scratch) { Remove-Item -Recurse -Force $scratch }
+$scratch = Join-Path $repo ("artifacts\test-scratch\machine-path-scan-" + [guid]::NewGuid().ToString("N"))
 try {
     $root = Join-Path $scratch "worker"
     New-Item -ItemType Directory -Force (Join-Path $root "_internal\torch") | Out-Null
@@ -35,6 +34,14 @@ try {
     & pwsh -NoProfile -File $scan -Root $root -AllowListPath $allow *> $null
     Check "allowlisted file still fails on a different pattern" ($LASTEXITCODE -ne 0)
     Set-Content $hub 'x = 1'
+    $numpy = Join-Path $root "_internal\numpy-2.3.3.dist-info\DELVEWHEEL"
+    New-Item -ItemType Directory -Force (Split-Path $numpy) | Out-Null
+    foreach ($sensitive in @($env:USERPROFILE, $repo)) {
+        Set-Content $numpy $sensitive
+        & pwsh -NoProfile -File $scan -Root $root -AllowListPath $allow *> $null
+        Check "allowlisted file rejects real path: $sensitive" ($LASTEXITCODE -ne 0)
+    }
+    Remove-Item $numpy
     Set-Content (Join-Path $root "other.py") 'TOKEN = "GITHUB_TOKEN"'
     & pwsh -NoProfile -File $scan -Root $root -AllowListPath $allow *> $null
     Check "same pattern in a non-allowlisted file fails" ($LASTEXITCODE -ne 0)
@@ -42,6 +49,24 @@ try {
     Set-Content (Join-Path $root "dependency-manifest.txt") "-e file:///C:/Users/someone/worker"
     & pwsh -NoProfile -File $scan -Root $root -AllowListPath $allow *> $null
     Check "manifest with machine path fails" ($LASTEXITCODE -ne 0)
+    Remove-Item (Join-Path $root "dependency-manifest.txt")
+    $binary = Join-Path $root "boundary.bin"
+    $stream = [IO.File]::Create($binary)
+    try {
+        $padding = New-Object byte[] (4MB - 5)
+        $stream.Write($padding, 0, $padding.Length)
+        $bytes = [Text.Encoding]::ASCII.GetBytes($repo)
+        $stream.Write($bytes, 0, $bytes.Length)
+    } finally { $stream.Dispose() }
+    & pwsh -NoProfile -File $scan -Root $root -AllowListPath $allow *> $null
+    Check "binary worktree path spanning scan chunks fails" ($LASTEXITCODE -ne 0)
+    Remove-Item $binary
+    Set-Content (Join-Path $root "models.json") '{"weight_file":"future.pth"}'
+    & pwsh -NoProfile -File $scan -Root $root -AllowListPath $allow *> $null
+    Check "catalog reference to a weight is not a bundled weight" ($LASTEXITCODE -eq 0)
+    Set-Content (Join-Path $root "future.pth") 'payload'
+    & pwsh -NoProfile -File $scan -Root $root -AllowListPath $allow *> $null
+    Check "bundled model weight is rejected" ($LASTEXITCODE -ne 0)
 
     # Manifest generator drops editable/file sources and rejects leaks.
     $out = Join-Path $scratch "manifest.txt"

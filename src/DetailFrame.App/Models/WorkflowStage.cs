@@ -51,7 +51,8 @@ public static class WorkflowStages
         {
             WorkflowStage.ChooseImage => state.CanConfigure,
             WorkflowStage.Enhance => state.CanCompare,
-            WorkflowStage.Configure => state.CanCompare,
+            WorkflowStage.Configure => !string.IsNullOrWhiteSpace(state.SelectedModelId)
+                && state.SelectedScale is > 0 && !string.IsNullOrWhiteSpace(state.SelectedDevice),
             _ => false,
         };
         return completed ? StageStatus.Completed : StageStatus.Available;

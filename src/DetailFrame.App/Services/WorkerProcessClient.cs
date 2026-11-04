@@ -547,6 +547,15 @@ public sealed class WorkerProcessClient : IWorkerClient
             if (!process.HasExited)
             {
                 process.Kill();
+                try
+                {
+                    using var killed = new CancellationTokenSource(_options.ExitGrace);
+                    await process.WaitForExitAsync(killed.Token);
+                }
+                catch (OperationCanceledException)
+                {
+                    throw new WorkerException("The worker could not be stopped.", process.StandardErrorTail);
+                }
             }
         }
     }
@@ -571,19 +580,20 @@ public sealed class ProcessWorkerLauncher : IWorkerLauncher
         _workingDirectory = workingDirectory;
     }
 
-    /// <summary>Finds the packaged worker, then the developer virtual environment; null if neither exists.</summary>
+    /// <summary>Finds the packaged worker; developer fallbacks are available only in Debug builds.</summary>
     public static ProcessWorkerLauncher? Locate(string modelsDirectory)
     {
-        var overridePath = Environment.GetEnvironmentVariable("DETAILFRAME_WORKER_PATH");
-        if (!string.IsNullOrEmpty(overridePath) && File.Exists(overridePath))
-        {
-            return new ProcessWorkerLauncher(overridePath, modelsDirectory);
-        }
-
         var bundled = Path.Combine(AppContext.BaseDirectory, "worker", "detailframe-worker.exe");
         if (File.Exists(bundled))
         {
             return new ProcessWorkerLauncher(bundled, modelsDirectory);
+        }
+
+#if DEBUG
+        var overridePath = Environment.GetEnvironmentVariable("DETAILFRAME_WORKER_PATH");
+        if (!string.IsNullOrEmpty(overridePath) && File.Exists(overridePath))
+        {
+            return new ProcessWorkerLauncher(overridePath, modelsDirectory);
         }
 
         for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir is not null; dir = dir.Parent)
@@ -593,13 +603,13 @@ public sealed class ProcessWorkerLauncher : IWorkerLauncher
             {
                 return new ProcessWorkerLauncher(packaged, modelsDirectory);
             }
-
             var python = Path.Combine(dir.FullName, "worker", ".venv", "Scripts", "python.exe");
             if (File.Exists(python))
             {
                 return new ProcessWorkerLauncher(python, modelsDirectory, ["-m", "detailframe_worker"], Path.Combine(dir.FullName, "worker"));
             }
         }
+#endif
 
         return null;
     }
@@ -617,6 +627,7 @@ public sealed class ProcessWorkerLauncher : IWorkerLauncher
             UseShellExecute = false,
             CreateNoWindow = true,
         };
+        info.Environment["DETAILFRAME_CATALOG_PATH"] = ModelCatalogService.DefaultCatalogPath;
         if (_workingDirectory is not null)
         {
             info.WorkingDirectory = _workingDirectory;

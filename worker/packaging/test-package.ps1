@@ -31,8 +31,10 @@ Assert-That (Test-Path $exe) "packaged worker not found at $exe"
 Assert-That (Test-Path (Join-Path $dist "dependency-manifest.txt")) "dependency manifest missing"
 
 $process = New-WorkerProcess "--version"
-$versionOutput = $process.StandardOutput.ReadToEnd().Trim()
-$process.WaitForExit()
+$stdoutTask = $process.StandardOutput.ReadToEndAsync()
+$stderrTask = $process.StandardError.ReadToEndAsync()
+if (-not $process.WaitForExit(120000)) { $process.Kill(); $process.WaitForExit(); throw "FAIL: worker --version timed out" }
+$versionOutput = $stdoutTask.Result.Trim()
 Assert-That ($process.ExitCode -eq 0) "--version exited with $($process.ExitCode)"
 Assert-That ($versionOutput -eq "detailframe-worker $expectedVersion") "unexpected --version output: '$versionOutput'"
 
@@ -46,8 +48,9 @@ try {
     $process.StandardInput.WriteLine($request)
     $process.StandardInput.Close()
     $stderrTask = $process.StandardError.ReadToEndAsync()
-    $stdout = $process.StandardOutput.ReadToEnd()
-    if (-not $process.WaitForExit(120000)) { $process.Kill(); throw "FAIL: worker did not exit" }
+    $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+    if (-not $process.WaitForExit(120000)) { $process.Kill(); $process.WaitForExit(); throw "FAIL: worker did not exit" }
+    $stdout = $stdoutTask.Result
     $stderr = $stderrTask.Result
     Assert-That ($process.ExitCode -eq 0) "worker exited with $($process.ExitCode): $stderr"
 

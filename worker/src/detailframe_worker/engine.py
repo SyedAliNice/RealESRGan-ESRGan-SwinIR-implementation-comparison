@@ -65,7 +65,7 @@ ADAPTERS: dict[str, ModelAdapter] = {}
 
 
 def _load_state_dict(variant: ModelVariant, models_dir: Path) -> dict[str, Any]:
-    checkpoint_path = models_dir / variant.weight_file
+    checkpoint_path = models_dir / variant.sha256 / variant.weight_file
     try:
         validate_checkpoint(variant, checkpoint_path)
         payload = checkpoint_path.read_bytes()
@@ -114,10 +114,26 @@ def resolve_device(requested: str, variant: ModelVariant) -> str:
     return requested
 
 
+def catalog_path(models_dir: Path) -> Path:
+    return Path(os.environ.get("DETAILFRAME_CATALOG_PATH") or models_dir / "models.json")
+
+
+def available_models(models_dir: Path) -> list[dict[str, object]]:
+    try:
+        catalog = load_catalog(catalog_path(models_dir))
+    except Exception:
+        return []
+    return [
+        {"id": item.id, "scales": [item.scale], "devices": list(variant_devices(item))}
+        for item in catalog
+        if item.enabled and item.architecture in ADAPTERS and variant_devices(item)
+    ]
+
+
 def available_devices(models_dir: Path) -> list[str]:
     devices = ["cpu"]
     try:
-        catalog = load_catalog(models_dir / "models.json")
+        catalog = load_catalog(catalog_path(models_dir))
     except Exception:
         return devices
     if any(item.enabled and "cuda" in variant_devices(item) for item in catalog):
@@ -234,9 +250,8 @@ def enhance(
         raise ProtocolError("INVALID_REQUEST", "Input and output paths must be different")
 
     models_dir = models_dir or input_path.parent
-    catalog_path = models_dir / "models.json"
     try:
-        catalog = load_catalog(catalog_path)
+        catalog = load_catalog(catalog_path(models_dir))
     except Exception as error:
         raise ProtocolError("MODEL_UNAVAILABLE", "The model catalog could not be loaded") from error
     variant = next((item for item in catalog if item.id == model_id and item.enabled), None)

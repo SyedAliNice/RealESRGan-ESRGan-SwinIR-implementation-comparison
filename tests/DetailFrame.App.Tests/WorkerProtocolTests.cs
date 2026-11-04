@@ -1,4 +1,5 @@
 using System.IO.Pipelines;
+using System.Diagnostics;
 using System.Text.Json;
 using DetailFrame.App.Services;
 using Xunit;
@@ -364,6 +365,45 @@ public class WorkerProtocolTests
             new WorkerProcessClient(launcher, FastOptions).EnhanceAsync(req, new Collector(), CancellationToken.None));
 
         Assert.True(launcher.Started[0].WasKilled);
+    }
+
+    [Fact]
+    public async Task CancellationTerminatesARealUnresponsiveProcessBeforeReturning()
+    {
+        var root = new DirectoryInfo(AppContext.BaseDirectory);
+        while (root is not null && !File.Exists(Path.Combine(root.FullName, "DetailFrame.sln")))
+            root = root.Parent;
+        var python = Path.Combine(root!.FullName, "worker", ".venv", "Scripts", "python.exe");
+        if (!File.Exists(python)) return;
+        var dir = Path.Combine(Path.GetTempPath(), "df-stuck-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        var pidPath = Path.Combine(dir, "pid.txt");
+        var script = $"import os,time;open({JsonSerializer.Serialize(pidPath)},'w').write(str(os.getpid()));time.sleep(60)";
+        var launcher = new ProcessWorkerLauncher(python, dir, ["-c", script]);
+        using var cts = new CancellationTokenSource();
+        int pid = 0;
+        try
+        {
+            var task = new WorkerProcessClient(launcher, FastOptions).EnhanceAsync(Request(), new Collector(), cts.Token);
+            for (var i = 0; i < 100 && !File.Exists(pidPath); i++) await Task.Delay(50);
+            Assert.True(File.Exists(pidPath), "Fixture process did not start.");
+            pid = int.Parse(await File.ReadAllTextAsync(pidPath));
+            var watch = Stopwatch.StartNew();
+            cts.Cancel();
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => task);
+            Assert.True(watch.Elapsed < TimeSpan.FromSeconds(5));
+            try { using var process = Process.GetProcessById(pid); Assert.True(process.HasExited); }
+            catch (ArgumentException) { /* The exited process has already disappeared. */ }
+        }
+        finally
+        {
+            if (pid != 0)
+            {
+                try { using var process = Process.GetProcessById(pid); if (!process.HasExited) process.Kill(); }
+                catch (ArgumentException) { }
+            }
+            Directory.Delete(dir, true);
+        }
     }
 
     [Fact]

@@ -48,6 +48,7 @@ $installerExe = Join-Path $ArtifactsRoot "installer\DetailFrame-Setup.exe"
 $required = @(
     @{ Dir = $appDir; File = "DetailFrame.App.exe" },
     @{ Dir = $appDir; File = "shared\models.json" },
+    @{ Dir = $appDir; File = "shared\models.schema.json" },
     @{ Dir = $appDir; File = "Assets\Branding\app.ico" },
     @{ Dir = $workerDir; File = "detailframe-worker.exe" },
     @{ Dir = $workerDir; File = "dependency-manifest.txt" }
@@ -82,6 +83,7 @@ function Get-FileEntries([string]$Dir, [string]$Prefix, [scriptblock]$Role) {
     $entries = foreach ($item in (Get-ChildItem -LiteralPath $root -Recurse -Force)) {
         if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) { Fail "reparse point not allowed: $($item.FullName)" }
         if ($item.PSIsContainer) { continue }
+        if ($item.LinkType -eq "HardLink") { Fail "hardlinked file not allowed: $($item.FullName)" }
         $full = [IO.Path]::GetFullPath($item.FullName)
         if (-not (Test-Under $full $root)) { Fail "path resolves outside staging directory: $full" }
         [pscustomobject]@{
@@ -104,8 +106,24 @@ if (-not $vm) { Fail "worker version not found in $pyproject" }
 $expectedWorker = $vm.Matches[0].Groups[1].Value
 
 # The version comes from the built binary; it must agree with the source version.
-$workerOut = (& (Join-Path $workerDir "detailframe-worker.exe") --version 2>&1 | Out-String).Trim()
-if ($LASTEXITCODE -ne 0) { Fail "built worker --version exited with $LASTEXITCODE" }
+$versionInfo = [Diagnostics.ProcessStartInfo]::new((Join-Path $workerDir "detailframe-worker.exe"))
+$versionInfo.ArgumentList.Add("--version")
+$versionInfo.UseShellExecute = $false
+$versionInfo.RedirectStandardOutput = $true
+$versionInfo.RedirectStandardError = $true
+$versionProcess = [Diagnostics.Process]::Start($versionInfo)
+try {
+    $stdoutTask = $versionProcess.StandardOutput.ReadToEndAsync()
+    $stderrTask = $versionProcess.StandardError.ReadToEndAsync()
+    if (-not $versionProcess.WaitForExit(120000)) {
+        $versionProcess.Kill()
+        $versionProcess.WaitForExit()
+        Fail "built worker --version timed out"
+    }
+    if ($versionProcess.ExitCode -ne 0) { Fail "built worker --version exited with $($versionProcess.ExitCode): $($stderrTask.Result)" }
+    $workerOut = $stdoutTask.Result.Trim()
+}
+finally { $versionProcess.Dispose() }
 $wm = [regex]::Match($workerOut, '(?<![\w.])(\d+(?:\.\d+)+\S*)\s*$')
 if (-not $wm.Success) { Fail "cannot parse built worker version from '$workerOut'" }
 $workerVersion = $wm.Groups[1].Value

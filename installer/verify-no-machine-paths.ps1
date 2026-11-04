@@ -57,6 +57,8 @@ if ($AllowListPath -and (Test-Path -LiteralPath $AllowListPath -PathType Leaf)) 
 }
 # An allow entry exempts exactly one pattern in exactly one file (path relative to the scanned root).
 function Test-Allowed([string]$Rel, [string]$Pattern) {
+    # Actual paths of this machine are never an allowlistable false positive.
+    if ($Pattern -like "machine path*") { return $false }
     foreach ($a in $allow) {
         if ($a.path -ieq ($Rel -replace '\\', '/') -and $a.pattern -eq $Pattern) { return $true }
     }
@@ -70,7 +72,8 @@ $problems = New-Object System.Collections.Generic.List[string]
 foreach ($f in Get-ChildItem -LiteralPath $rootFull -Recurse -File) {
     $rel = $f.FullName.Substring($rootFull.Length).TrimStart('\')
     $ext = $f.Extension.ToLowerInvariant()
-    if ($weightExt -contains $ext) { $problems.Add("unverified model file: $rel"); continue }
+    # This scans shipped payload files, not catalog strings; weights are downloaded on demand.
+    if ($weightExt -contains $ext) { $problems.Add("bundled model weight is not permitted: $rel"); continue }
     if ($textExt -notcontains $ext) {
         # Binaries (exe, dll, pdb, pyd...) can embed source paths: stream-scan ASCII and UTF-16LE forms.
         foreach ($hit in Find-BinaryPathHits $f.FullName) { Add-Problem ($hit -replace ' \(binary\)$','') $rel "$hit in $rel" }
@@ -91,4 +94,3 @@ if ($problems.Count -gt 0) {
     exit 1
 }
 "PASS  no machine paths, credentials or model weights under $rootFull"
-

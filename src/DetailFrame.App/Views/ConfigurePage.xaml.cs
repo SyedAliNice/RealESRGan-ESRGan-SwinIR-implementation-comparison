@@ -13,6 +13,7 @@ public sealed partial class ConfigurePage : UserControl
     private CancellationTokenSource? _downloadCts;
     private bool _updating;
     private bool _loaded;
+    private int _refreshVersion;
 
     public ConfigurePage(ModelCatalogService catalog, ModelDownloadService downloads)
     {
@@ -70,7 +71,7 @@ public sealed partial class ConfigurePage : UserControl
         SelectionChanged?.Invoke(this, ModelSelection.None);
     }
 
-    private void Refresh()
+    private async void Refresh()
     {
         _updating = true;
         var modelId = _selector.SelectedModelId!;
@@ -95,7 +96,15 @@ public sealed partial class ConfigurePage : UserControl
             StatusBar.IsOpen = false;
         }
 
-        var installed = _downloads.GetInstalled(variant);
+        var refreshVersion = ++_refreshVersion;
+        SelectionChanged?.Invoke(this, ModelSelection.None);
+        DownloadButton.Visibility = Visibility.Collapsed;
+        ModelStatus.Text = "Checking installed model…";
+        var installed = await _downloads.GetInstalledAsync(variant);
+        if (refreshVersion != _refreshVersion)
+        {
+            return;
+        }
         var size = variant.SizeBytes is { } bytes ? $" ({FormatSize(bytes)})" : "";
         ModelStatus.Text = installed is not null
             ? $"{variant.DisplayName} is installed."

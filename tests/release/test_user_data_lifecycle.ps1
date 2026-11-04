@@ -37,13 +37,12 @@ Check "removal runs only after uninstall (usPostUninstall)" ($code -match 'CurUn
 Check "interactive prompt defaults to No" ($code -match 'MB_YESNO or MB_DEFBUTTON2')
 Check "prompt copy names the path and the consequence" (($code -match "UserDataDir \+ #13#10") -and ($code -match 'settings and downloaded models') -and ($code -match 'downloaded again'))
 Check "silent uninstall deletes only with /REMOVEUSERDATA" (($code -match 'if UninstallSilent then\s+Remove := RemoveUserDataRequested') -and ($code -match "'/REMOVEUSERDATA'"))
-Check "removal is gated by the Remove flag" ($code -match 'if Remove then\s+DelTree')
+Check "removal is gated and failure is reported" ($code -match 'if Remove then\s+if not DelTree' -and $code -match "Log\('Could not remove DetailFrame user data\.'\)")
 Check "shared Windows App SDK runtime is not uninstalled" ($iss -notmatch '(?i)WindowsAppRuntime.*(uninstall|/uninstall)' -and $iss -match 'runtime is not removed')
 
 # Behaviour of the data layout itself: fake settings and verified model cache survive a simulated
 # app-directory replacement (what an upgrade does to {app}) in a scratch area.
-$scratch = Join-Path $repo "artifacts\test-fixture\lifecycle"
-if (Test-Path $scratch) { Remove-Item -Recurse -Force $scratch }
+$scratch = Join-Path $repo ("artifacts\test-fixture\lifecycle-" + [guid]::NewGuid().ToString("N"))
 $app = Join-Path $scratch "ProgramFiles\DetailFrame"
 $data = Join-Path $scratch "LocalAppData\DetailFrame"
 New-Item -ItemType Directory -Force (Join-Path $app "worker"), (Join-Path $data "Models"), (Join-Path $data "Settings") | Out-Null
